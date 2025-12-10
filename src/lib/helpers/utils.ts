@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import Fuse from "fuse.js";
+import { DateTime } from "luxon";
 
 /**
  * Search for a customer by name using fuzzy search in the customer database
@@ -112,6 +113,7 @@ export const getAgentByCalendarConnection = async (
 
 /**
  * Check if a time slot is within office hours
+ * Properly handles timezone conversion - if datetime has no timezone, treats it as agent's timezone
  */
 export const isWithinOfficeHours = (
   dateTime: string,
@@ -123,20 +125,36 @@ export const isWithinOfficeHours = (
   }
 
   try {
-    const date = new Date(dateTime);
-    const dayOfWeek = date
-      .toLocaleDateString("en-US", {
-        weekday: "long",
-        timeZone: timezone,
-      })
-      .toLowerCase();
-
-    const timeString = date.toLocaleTimeString("en-US", {
-      hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: timezone,
-    });
+    // Parse the datetime string
+    // If it has no timezone indicator (no 'Z' or '+/-'), treat it as being in the agent's timezone
+    let dt: DateTime;
+    
+    if (dateTime.includes('Z') || dateTime.includes('+') || dateTime.includes('-', 10)) {
+      // Has timezone info, parse as-is
+      dt = DateTime.fromISO(dateTime);
+    } else {
+      // No timezone info - treat as agent's local time
+      // Parse as if it's in the agent's timezone
+      dt = DateTime.fromISO(dateTime, { zone: timezone });
+    }
+    
+    // If parsing failed, fall back to Date constructor
+    if (!dt.isValid) {
+      console.warn(`⚠️ Failed to parse datetime with Luxon: ${dateTime}, falling back to Date`);
+      const date = new Date(dateTime);
+      dt = DateTime.fromJSDate(date, { zone: timezone });
+    }
+    
+    // Convert to agent's timezone if not already
+    const dtInTimezone = dt.setZone(timezone);
+    
+    // Get day of week in lowercase (monday, tuesday, etc.)
+    const dayOfWeek = dtInTimezone.toFormat('cccc').toLowerCase();
+    
+    // Get time string in HH:mm format
+    const timeString = dtInTimezone.toFormat('HH:mm');
+    
+    console.log(`🔍 Office hours check: ${dateTime} → ${dtInTimezone.toISO()} (${timezone}) = ${dayOfWeek} ${timeString}`);
 
     // Convert office hours format - assuming it's like:
     // { "monday": { "start": "09:00", "end": "17:00", "enabled": true }, ... }
