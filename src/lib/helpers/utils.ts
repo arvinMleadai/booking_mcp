@@ -181,6 +181,7 @@ export const getAgentWithCalendarByUUID = async (
 
   try {
     // Get agent with profile and calendar assignment
+    // Use explicit foreign key relationship: profiles!profile_id
     const { data: agent, error: agentError } = await supabase
       .from("agents")
       .select(
@@ -193,7 +194,7 @@ export const getAgentWithCalendarByUUID = async (
         is_dedicated,
         profile_id,
         assigned_email_id,
-        profiles (
+        profiles!profile_id (
           id,
           name,
           office_hours,
@@ -209,6 +210,33 @@ export const getAgentWithCalendarByUUID = async (
     if (agentError || !agent) {
       console.error("Agent not found:", agentError);
       return null;
+    }
+
+    // Debug: Log profile data to see what we're getting
+    console.log(`🔍 Agent ${agent.name} profile_id: ${agent.profile_id}`);
+    console.log(`🔍 Agent profiles data:`, JSON.stringify(agent.profiles, null, 2));
+    
+    // If profile relationship didn't load, fetch it separately
+    // Note: Supabase can return profiles as array or single object depending on relationship
+    const hasProfile = Array.isArray(agent.profiles) 
+      ? agent.profiles.length > 0 
+      : agent.profiles !== null && agent.profiles !== undefined;
+    
+    if (!hasProfile && agent.profile_id) {
+      console.log(`⚠️ Profile relationship not loaded, fetching separately for profile_id: ${agent.profile_id}`);
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, name, office_hours, timezone")
+        .eq("id", agent.profile_id)
+        .single();
+      
+      if (!profileError && profile) {
+        // Assign as single object (Supabase relationship can be array or object)
+        (agent as any).profiles = profile;
+        console.log(`✅ Fetched profile separately:`, JSON.stringify(profile, null, 2));
+      } else {
+        console.error(`❌ Error fetching profile separately:`, profileError);
+      }
     }
 
     // Get calendar assignment for this agent

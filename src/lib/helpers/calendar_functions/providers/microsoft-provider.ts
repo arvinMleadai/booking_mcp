@@ -21,8 +21,7 @@ export class MicrosoftCalendarProvider implements CalendarProvider {
   readonly name = 'microsoft'
 
   canHandle(connection: GraphCalendarConnection): boolean {
-    const providerName = connection.provider_name?.toLowerCase()
-    return providerName === 'microsoft' || providerName === 'office365'
+    return connection.provider_name === 'microsoft' || connection.provider_name === 'office365'
   }
 
   /**

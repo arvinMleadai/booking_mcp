@@ -3,6 +3,7 @@ import type { GraphCalendarConnection } from '@/types'
 import { AdvancedCacheService } from '../cache/advancedCacheService'
 import { EnhancedGraphApiService } from './enhancedGraphApiService'
 import { isWithinOfficeHours } from '../utils'
+import { DateTime } from 'luxon'
 
 interface TimeSlot {
   start: Date
@@ -212,12 +213,29 @@ export class OptimizedConflictDetection {
         }
       }
 
-      // Get busy periods for slot finding
-      const searchWindow = searchWindowHours * 60 * 60 * 1000
-      const searchStart = new Date(requestedStart.getTime() - searchWindow)
-      const searchEnd = new Date(requestedEnd.getTime() + searchWindow)
+      // Determine search window for finding alternatives
+      // If office hours are configured and violated, search the entire day within office hours
+      // Otherwise, use the configured search window
+      let searchStart: Date
+      let searchEnd: Date
       
-      console.log(`🔍 Searching ${searchWindowHours}h window for alternatives`)
+      if (officeHours && conflictCheck.conflictDetails?.includes('Outside office hours')) {
+        // Office hours violation: search entire day within office hours
+        searchStart = new Date(requestedStart)
+        searchStart.setHours(0, 0, 0, 0)
+        
+        searchEnd = new Date(requestedStart)
+        searchEnd.setHours(23, 59, 59, 999)
+        
+        console.log(`🔍 Office hours violation detected - searching entire day for available slots within office hours`)
+      } else {
+        // Regular conflict: use configured search window
+        const searchWindow = searchWindowHours * 60 * 60 * 1000
+        searchStart = new Date(requestedStart.getTime() - searchWindow)
+        searchEnd = new Date(requestedEnd.getTime() + searchWindow)
+        
+        console.log(`🔍 Searching ${searchWindowHours}h window for alternatives`)
+      }
       
       const busyPeriods = await EnhancedGraphApiService.getEventsOptimized(
         connection,
@@ -321,19 +339,21 @@ export class OptimizedConflictDetection {
     const now = new Date()
     const minSlotTime = new Date(now.getTime() + 15 * 60 * 1000) // 15 min buffer
     
-    // Smart slot generation - limit to same day only for better UX
-    // Get start and end of the requested day
-    const dayStart = new Date(requestedStart)
-    dayStart.setHours(0, 0, 0, 0)
+    // Use agent timezone for day boundaries (default to UTC if not provided)
+    const tz = agentTimezone || ""
     
-    const dayEnd = new Date(requestedStart)
-    dayEnd.setHours(23, 59, 59, 999)
+    // Get the requested day in the agent's timezone (not UTC)
+    const requestedDayInTZ = this.getDateStringInTimezone(requestedStart, tz)
+    
+    // Get start and end of the requested day in the agent's timezone
+    const { dayStart, dayEnd } = this.getDayBoundariesInTimezone(requestedStart, tz)
     
     // Use day boundaries for search window (don't cross to other days)
     const searchStart = dayStart
     const searchEnd = dayEnd
     
-    console.log(`📅 Limiting slot search to same day: ${searchStart.toISOString()} to ${searchEnd.toISOString()}`)
+    console.log(`📅 Limiting slot search to same day (${tz}): ${searchStart.toISOString()} to ${searchEnd.toISOString()}`)
+    console.log(`📅 Requested day in ${tz}: ${requestedDayInTZ}`)
     
     // Generate candidate slots with smart intervals
     const candidates = this.generateSmartCandidates(
@@ -349,15 +369,12 @@ export class OptimizedConflictDetection {
     let skippedOfficeHours = 0
     let skippedDifferentDay = 0
 
-    // Get the requested day for comparison
-    const requestedDay = requestedStart.toISOString().split('T')[0]
-
     for (const candidate of candidates) {
       if (slots.length >= maxSuggestions) break
       
-      // Skip if not on the same day as requested
-      const candidateDay = candidate.start.toISOString().split('T')[0]
-      if (candidateDay !== requestedDay) {
+      // Skip if not on the same day as requested (compare in agent's timezone)
+      const candidateDayInTZ = this.getDateStringInTimezone(candidate.start, tz)
+      if (candidateDayInTZ !== requestedDayInTZ) {
         skippedDifferentDay++
         continue
       }
@@ -472,6 +489,34 @@ export class OptimizedConflictDetection {
       minute: '2-digit',
       hour12: true
     })
+  }
+
+  /**
+   * Get date string (YYYY-MM-DD) in a specific timezone
+   */
+  private static getDateStringInTimezone(date: Date, timezone: string): string {
+    const dt = DateTime.fromJSDate(date, { zone: timezone })
+    return dt.toFormat('yyyy-MM-dd')
+  }
+
+  /**
+   * Get start and end of day boundaries in a specific timezone
+   */
+  private static getDayBoundariesInTimezone(date: Date, timezone: string): { dayStart: Date; dayEnd: Date } {
+    // Convert to DateTime in the target timezone
+    const dt = DateTime.fromJSDate(date, { zone: timezone })
+    
+    // Get start of day in the target timezone
+    const dayStart = dt.startOf('day')
+    
+    // Get end of day in the target timezone
+    const dayEnd = dt.endOf('day')
+    
+    // Convert back to JS Date (UTC)
+    return {
+      dayStart: dayStart.toJSDate(),
+      dayEnd: dayEnd.toJSDate()
+    }
   }
 }
 

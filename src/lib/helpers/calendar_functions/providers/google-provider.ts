@@ -12,6 +12,7 @@ import type {
 import type { GraphCalendarConnection } from '@/types'
 import { google } from 'googleapis'
 import { updateCalendarConnectionTokens } from '../graphDatabase'
+import { GoogleRateLimiter } from '../googleRateLimiter'
 
 /**
  * Google Calendar Provider
@@ -21,6 +22,24 @@ export class GoogleCalendarProvider implements CalendarProvider {
 
   canHandle(connection: GraphCalendarConnection): boolean {
     return connection.provider_name === 'google'
+  }
+
+  /**
+   * Helper to wrap API calls with rate limiting
+   */
+  private async withRateLimit<T>(
+    connection: GraphCalendarConnection,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const rateLimiter = GoogleRateLimiter.getInstance(connection.id)
+    await rateLimiter.waitForSlot()
+    
+    try {
+      return await operation()
+    } catch (error) {
+      rateLimiter.recordResponse(error)
+      throw error
+    }
   }
 
   /**
@@ -114,10 +133,11 @@ export class GoogleCalendarProvider implements CalendarProvider {
     error?: string
   }> {
     try {
-      const oauth2Client = this.getOAuth2Client(connection)
-      const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
-
-      const response = await calendar.calendarList.list()
+      const response = await this.withRateLimit(connection, async () => {
+        const oauth2Client = this.getOAuth2Client(connection)
+        const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+        return await calendar.calendarList.list()
+      })
       
       if (!response.data.items) {
         return {
@@ -155,9 +175,6 @@ export class GoogleCalendarProvider implements CalendarProvider {
     error?: string
   }> {
     try {
-      const oauth2Client = this.getOAuth2Client(connection)
-      const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
-
       const {
         calendarId = 'primary',
         startDateTime,
@@ -186,7 +203,11 @@ export class GoogleCalendarProvider implements CalendarProvider {
         params.timeMax = endDateTime
       }
 
-      const response = await calendar.events.list(params)
+      const response = await this.withRateLimit(connection, async () => {
+        const oauth2Client = this.getOAuth2Client(connection)
+        const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+        return await calendar.events.list(params)
+      })
 
       if (!response.data.items) {
         return {
@@ -305,9 +326,13 @@ export class GoogleCalendarProvider implements CalendarProvider {
         }
       }
 
-      const response = await calendar.events.insert({
-        calendarId: 'primary',
-        requestBody: eventData,
+      const response = await this.withRateLimit(connection, async () => {
+        const oauth2Client = this.getOAuth2Client(connection)
+        const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+        return await calendar.events.insert({
+          calendarId: 'primary',
+          requestBody: eventData,
+        })
       })
 
       if (!response.data) {
@@ -433,10 +458,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
       const oauth2Client = this.getOAuth2Client(connection)
       const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
 
-      await calendar.events.delete({
-        calendarId: calendarId || 'primary',
-        eventId,
-        sendUpdates: 'all',
+      await this.withRateLimit(connection, async () => {
+        const oauth2Client = this.getOAuth2Client(connection)
+        const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+        return await calendar.events.delete({
+          calendarId: calendarId || 'primary',
+          eventId,
+          sendUpdates: 'all',
+        })
       })
 
       return {
@@ -465,12 +494,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
       const oauth2Client = this.getOAuth2Client(connection)
       const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
 
-      const freebusyResponse = await calendar.freebusy.query({
-        requestBody: {
-          timeMin: request.startDateTime,
-          timeMax: request.endDateTime,
-          items: request.emails.map(email => ({ id: email })),
-        },
+      const freebusyResponse = await this.withRateLimit(connection, async () => {
+        const oauth2Client = this.getOAuth2Client(connection)
+        const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+        return await calendar.freebusy.query({
+          requestBody: {
+            timeMin: request.startDateTime,
+            timeMax: request.endDateTime,
+            items: request.emails.map(email => ({ id: email })),
+          },
+        })
       })
 
       if (!freebusyResponse.data.calendars) {
@@ -510,7 +543,11 @@ export class GoogleCalendarProvider implements CalendarProvider {
       const oauth2Client = this.getOAuth2Client(connection)
       const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
 
-      await calendar.calendarList.list({ maxResults: 1 })
+      await this.withRateLimit(connection, async () => {
+        const oauth2Client = this.getOAuth2Client(connection)
+        const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+        return await calendar.calendarList.list({ maxResults: 1 })
+      })
 
       return {
         success: true,

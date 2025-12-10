@@ -154,19 +154,41 @@ export class CalendarService {
       // Get timezone directly from database (don't need calendar connection for this)
       const timeZone = await AdvancedCacheService.getClientTimezone(clientId) || 'UTC'
 
-      // Check for conflicts (optional - can be enhanced)
-      const conflictCheck = await this.checkConflicts(
+      // Check for conflicts using optimized conflict detection
+      const { OptimizedConflictDetection } = await import('./optimizedConflictDetection')
+      const conflictCheck = await OptimizedConflictDetection.checkForConflicts(
         connection,
         request.startDateTime,
         request.endDateTime,
         timeZone
       )
 
-      if (conflictCheck.hasConflict && conflictCheck.availableSlots) {
+      // Block booking if there's ANY conflict
+      if (conflictCheck.hasConflict) {
+        // Try to find available slots as alternatives
+        const availableSlotsResult = await OptimizedConflictDetection.findAvailableSlots(
+          connection,
+          request.startDateTime,
+          request.endDateTime,
+          timeZone,
+          {
+            durationMinutes: Math.round(
+              (new Date(request.endDateTime).getTime() - new Date(request.startDateTime).getTime()) / (1000 * 60)
+            ) || 30,
+            maxSuggestions: 3,
+          }
+        )
+
         return {
           success: false,
-          error: `Scheduling conflict detected: ${conflictCheck.conflictDetails}`,
-          availableSlots: conflictCheck.availableSlots,
+          error: `Scheduling conflict detected: ${conflictCheck.conflictDetails || 'Time slot is already booked'}`,
+          availableSlots: availableSlotsResult.availableSlots?.map(slot => ({
+            start: slot.start.toISOString(),
+            end: slot.end.toISOString(),
+            startFormatted: slot.startFormatted,
+            endFormatted: slot.endFormatted,
+            confidence: slot.confidence,
+          })),
         }
       }
 
@@ -512,11 +534,12 @@ export class CalendarService {
         requestedEndTime,
         timeZone,
         {
-          durationMinutes: options.durationMinutes || 60,
+          durationMinutes: options.durationMinutes || 30,
           maxSuggestions: options.maxSuggestions || 3,
           officeHours: options.officeHours,
           agentTimezone: options.agentTimezone || timeZone,
-          searchWindowHours: 0,
+          // Use a reasonable search window (4 hours default, or full day if office hours violation)
+          searchWindowHours: 4,
         }
       )
 

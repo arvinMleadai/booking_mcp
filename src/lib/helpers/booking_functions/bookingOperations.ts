@@ -211,6 +211,9 @@ export class BookingOperations {
       const defaultDescription = request.description || 
         `Scheduled appointment with ${customerDisplayName}`;
 
+      // Default subject to customer name if not provided
+      const eventSubject = request.subject || customerDisplayName || 'Appointment';
+
       console.log(`Creating calendar event via ${validation.calendarProvider}`);
 
       // Get client timezone
@@ -221,7 +224,7 @@ export class BookingOperations {
 
       // Use unified CalendarService (supports both Microsoft and Google)
       const calendarServiceRequest: CreateEventRequest = {
-        subject: request.subject,
+        subject: eventSubject,
         startDateTime: request.startDateTime,
         endDateTime: request.endDateTime,
         timeZone,
@@ -385,7 +388,7 @@ export class BookingOperations {
         startDateTime,
         endDateTime,
         {
-          durationMinutes: request.durationMinutes || 60,
+          durationMinutes: request.durationMinutes || 30,
           maxSuggestions: request.maxSuggestions || 3,
           officeHours: profile?.office_hours as Record<string, { start: string; end: string; enabled: boolean }> || null,
           agentTimezone,

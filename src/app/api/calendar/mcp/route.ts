@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
-// All calendar operations now use FinalOptimizedCalendarOperations
-import { FinalOptimizedCalendarOperations } from "@/lib/helpers/calendar_functions/finalOptimizedCalendarOperations";
+// All calendar operations now use unified CalendarService (supports both Microsoft and Google)
+import { CalendarService } from "@/lib/helpers/calendar_functions/calendar-service";
 import { AdvancedCacheService } from "@/lib/helpers/cache/advancedCacheService";
 import {
   getCustomerWithFuzzySearch, 
@@ -53,7 +53,7 @@ const handler = createMcpHandler(
             endDate,
           } = input;
           
-          console.log("get calendar events (Microsoft Graph)");
+          console.log("get calendar events (Calendar MCP)");
           console.table(input);
           
           // Convert and validate clientId
@@ -71,16 +71,16 @@ const handler = createMcpHandler(
             };
           }
 
-          const request: GetGraphEventsRequest = {
-            clientId: numericClientId,
-            dateRequest,
-            calendarId,
-            startDate,
-            endDate,
-          };
-          console.log("Request: ", request)
-
-          const result = await FinalOptimizedCalendarOperations.getCalendarEventsForClient(numericClientId, request);
+          // Use unified CalendarService (supports both Microsoft and Google)
+          const result = await CalendarService.getEvents(
+            numericClientId,
+            {
+              dateRequest,
+              calendarId,
+              startDateTime: startDate,
+              endDateTime: endDate,
+            }
+          );
 
           if (!result.success) {
             return {
@@ -295,83 +295,91 @@ const handler = createMcpHandler(
           // Get calendar connection to find assigned agent and office hours
           console.log(`🏢 Checking office hours for calendar booking...`);
           
-          // We need to get the calendar connection ID first
-          const { getCalendarConnectionByClientId } = await import("@/lib/helpers/calendar_functions");
+          // Use unified CalendarService (supports both Microsoft and Google)
+          // Get agent assignment if available for office hours check
+          let agentId: string | undefined;
+          const { getCalendarConnectionByClientId } = await import("@/lib/helpers/calendar_functions/graphDatabase");
           const connection = await getCalendarConnectionByClientId(numericClientId);
           
-          if (!connection) {
+          if (connection) {
+            // Get agent assigned to this calendar connection
+            const agentAssignment = await getAgentByCalendarConnection(connection.id);
+            
+            if (agentAssignment && agentAssignment.agents) {
+              const agent = agentAssignment.agents as unknown as {
+                uuid: string;
+                name: string;
+                profiles: {
+                  id: number;
+                  name: string;
+                  office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+                  timezone: string;
+                } | {
+                  id: number;
+                  name: string;
+                  office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+                  timezone: string;
+                }[];
+              };
+              
+              agentId = agent.uuid;
+              const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
+              if (profile) {
+                // Check if the requested time is within office hours
+                const officeHoursCheck = isWithinOfficeHours(
+                  startDateTime, 
+                  profile.office_hours, 
+                  profile.timezone || 'Australia/Melbourne'
+                );
+                
+                if (!officeHoursCheck.isWithin) {
+                  return {
+                    content: [
+                      {
+                        type: "text",
+                        text: `❌ **OUTSIDE OFFICE HOURS**\n\n${officeHoursCheck.reason}\n\n👤 Agent: ${agent.name}`,
+                      },
+                    ],
+                  };
+                }
+                
+                console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
+              }
+            } else {
+              console.log(`⚠️ No agent assignment found for calendar connection. Proceeding without office hours validation.`);
+            }
+          } else {
             return {
               content: [
                 {
                   type: "text",
-                  text: "Error: No calendar connection found for this client. Please connect a Microsoft calendar first.",
+                  text: "Error: No calendar connection found for this client. Please connect a calendar first.",
                 },
               ],
             };
           }
 
-          // Get agent assigned to this calendar connection
-          const agentAssignment = await getAgentByCalendarConnection(connection.id);
-          
-          if (agentAssignment && agentAssignment.agents) {
-            const agent = agentAssignment.agents as unknown as {
-              uuid: string;
-              name: string;
-              profiles: {
-                id: number;
-                name: string;
-                office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
-                timezone: string;
-              } | {
-                id: number;
-                name: string;
-                office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
-                timezone: string;
-              }[];
-            };
-            
-            const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
-            if (profile) {
-              // Check if the requested time is within office hours
-              const officeHoursCheck = isWithinOfficeHours(
-                startDateTime, 
-                profile.office_hours, 
-                profile.timezone || 'Australia/Melbourne'
-              );
-              
-              if (!officeHoursCheck.isWithin) {
-                return {
-                  content: [
-                    {
-                      type: "text",
-                      text: `❌ **OUTSIDE OFFICE HOURS**\n\n${officeHoursCheck.reason}\n\n👤 Agent: ${agent.name}`,
-                    },
-                  ],
-                };
-              }
-              
-              console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
-            }
-          } else {
-            console.log(`⚠️ No agent assignment found for calendar connection. Proceeding without office hours validation.`);
-          }
+          // Get client timezone
+          const clientData = await AdvancedCacheService.getClientCalendarData(numericClientId);
+          const timeZone = clientData?.timezone || 'UTC';
 
-          const request: CreateGraphEventMCPRequest = {
-            clientId: numericClientId,
-            subject,
-            startDateTime,
-            endDateTime,
-            attendeeEmail: finalAttendeeEmail,
-            attendeeName: finalAttendeeName,
-            description,
-            location,
-            isOnlineMeeting,
-            calendarId,
-          };
+          console.log(`🔍 Creating calendar event via CalendarService`);
 
-          console.log(`🔍 DEBUG MCP: Request object being passed:`, JSON.stringify(request, null, 2));
-
-          const result = await FinalOptimizedCalendarOperations.createCalendarEventForClient(numericClientId, request);
+          const result = await CalendarService.createEvent(
+            numericClientId,
+            {
+              subject,
+              startDateTime,
+              endDateTime,
+              timeZone,
+              description,
+              location,
+              attendeeEmail: finalAttendeeEmail,
+              attendeeName: finalAttendeeName,
+              isOnlineMeeting,
+            },
+            agentId // Use agent's assigned calendar if available
+          );
 
           if (!result.success) {
             // Check if it's a conflict with suggested slots
@@ -408,12 +416,12 @@ const handler = createMcpHandler(
           responseText += `🕐 ${new Date(result.event?.start.dateTime || startDateTime).toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit' })} - ${new Date(result.event?.end.dateTime || endDateTime).toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit' })}\n`;
           responseText += `👤 ${finalAttendeeName || finalAttendeeEmail}\n`;
           
-          if (result.event?.location?.displayName) {
-            responseText += `📍 ${result.event.location.displayName}\n`;
+          if (result.event?.location) {
+            responseText += `📍 ${result.event.location}\n`;
           }
 
-          if (result.event?.onlineMeeting?.joinUrl) {
-            responseText += `💻 Teams Meeting: ${result.event.onlineMeeting.joinUrl}\n`;
+          if (result.event?.onlineMeetingUrl) {
+            responseText += `💻 Meeting: ${result.event.onlineMeetingUrl}\n`;
           }
           
           responseText += `\n🆔 ${result.eventId}`;
@@ -572,7 +580,36 @@ const handler = createMcpHandler(
             calendarId,
           };
 
-          const result = await FinalOptimizedCalendarOperations.updateCalendarEventForClient(numericClientId, eventId, updates);
+          // Get client timezone
+          const clientData = await AdvancedCacheService.getClientCalendarData(numericClientId);
+          const timeZone = clientData?.timezone || 'UTC';
+
+          // Use unified CalendarService (supports both Microsoft and Google)
+          const updateRequest: {
+            subject?: string
+            startDateTime?: string
+            endDateTime?: string
+            timeZone?: string
+            description?: string
+            location?: string
+            attendeeEmail?: string
+            attendeeName?: string
+          } = {
+            subject: updates.subject,
+            startDateTime: updates.startDateTime,
+            endDateTime: updates.endDateTime,
+            timeZone: timeZone,
+            description: updates.description,
+            location: updates.location,
+            attendeeEmail: updates.attendeeEmail,
+            attendeeName: updates.attendeeName,
+          };
+          
+          const result = await CalendarService.updateEvent(
+            numericClientId,
+            eventId,
+            updateRequest
+          );
 
           if (!result.success) {
             return {
@@ -600,8 +637,8 @@ const handler = createMcpHandler(
           
           responseText += `- **Client ID**: ${numericClientId}\n`;
 
-          if (result.event?.location?.displayName) {
-            responseText += `- **Location**: ${result.event.location.displayName}\n`;
+          if (result.event?.location) {
+            responseText += `- **Location**: ${result.event.location}\n`;
           }
 
           return {
@@ -663,7 +700,12 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await FinalOptimizedCalendarOperations.deleteCalendarEventForClient(numericClientId, eventId, calendarId);
+          // Use unified CalendarService (supports both Microsoft and Google)
+          const result = await CalendarService.deleteEvent(
+            numericClientId,
+            eventId,
+            calendarId
+          );
 
           if (!result.success) {
             return {
@@ -735,7 +777,7 @@ const handler = createMcpHandler(
       async (input) => {
         const { clientId, dateRequest, startDate, endDate, searchQuery, confirmDeletion, calendarId } = input;
 
-        console.log("bulk delete calendar events (Microsoft Graph)");
+          console.log("bulk delete calendar events (Calendar MCP)");
         console.table(input);
 
         const numericClientId =
@@ -775,13 +817,32 @@ const handler = createMcpHandler(
               calendarId
             };
 
-            const eventsResult = await FinalOptimizedCalendarOperations.getCalendarEventsForClient(
-              numericClientId, 
-              getEventsRequest
+            // Use unified CalendarService
+            const eventsResult = await CalendarService.getEvents(
+              numericClientId,
+              {
+                dateRequest,
+                startDateTime: startDate,
+                endDateTime: endDate,
+                calendarId,
+              }
             );
 
             if (eventsResult.success && eventsResult.events) {
-              eventsToDelete = eventsResult.events;
+              eventsToDelete = eventsResult.events.map(event => ({
+                id: event.id,
+                subject: event.subject,
+                start: event.start,
+                end: event.end,
+                location: event.location ? { displayName: event.location } : undefined,
+                attendees: event.attendees?.map(a => ({
+                  emailAddress: { name: a.name, address: a.email }
+                })),
+                organizer: event.organizer ? {
+                  emailAddress: { name: event.organizer.name, address: event.organizer.email }
+                } : undefined,
+                body: event.description ? { content: event.description } : undefined,
+              }));
             }
           }
 
@@ -795,14 +856,38 @@ const handler = createMcpHandler(
             );
           } else if (searchQuery && eventsToDelete.length === 0) {
             // If only search query provided, search all events
-            const searchResult = await FinalOptimizedCalendarOperations.searchCalendarEventsForClient(
+            // Get all events and filter by search query
+            const allEventsResult = await CalendarService.getEvents(
               numericClientId,
-              searchQuery,
-              { calendarId }
+              {
+                calendarId,
+                startDateTime: startDate,
+                endDateTime: endDate,
+              }
             );
 
-            if (searchResult.success && searchResult.events) {
-              eventsToDelete = searchResult.events;
+            if (allEventsResult.success && allEventsResult.events) {
+              const searchLower = searchQuery.toLowerCase();
+              eventsToDelete = allEventsResult.events
+                .filter(event => 
+                  event.subject?.toLowerCase().includes(searchLower) ||
+                  event.description?.toLowerCase().includes(searchLower) ||
+                  event.location?.toLowerCase().includes(searchLower)
+                )
+                .map(event => ({
+                  id: event.id,
+                  subject: event.subject,
+                  start: event.start,
+                  end: event.end,
+                  location: event.location ? { displayName: event.location } : undefined,
+                  attendees: event.attendees?.map(a => ({
+                    emailAddress: { name: a.name, address: a.email }
+                  })),
+                  organizer: event.organizer ? {
+                    emailAddress: { name: event.organizer.name, address: event.organizer.email }
+                  } : undefined,
+                  body: event.description ? { content: event.description } : undefined,
+                }));
             }
           }
 
@@ -876,7 +961,8 @@ const handler = createMcpHandler(
 
           for (const event of eventsToDelete) {
             try {
-              const deleteResult = await FinalOptimizedCalendarOperations.deleteCalendarEventForClient(
+              // Use unified CalendarService
+              const deleteResult = await CalendarService.deleteEvent(
                 numericClientId, 
                 event.id, 
                 calendarId
@@ -998,7 +1084,7 @@ const handler = createMcpHandler(
             calendarId,
           } = input;
           
-          console.log("search calendar events (Microsoft Graph)");
+          console.log("search calendar events (Calendar MCP)");
           console.table(input);
 
           // Convert and validate clientId
@@ -1016,22 +1102,80 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await FinalOptimizedCalendarOperations.searchCalendarEventsForClient(
+          // Use unified CalendarService - get all events and filter by search query
+          const allEventsResult = await CalendarService.getEvents(
             numericClientId,
-            searchQuery,
-            { startDate, endDate, calendarId }
+            {
+              startDateTime: startDate,
+              endDateTime: endDate,
+              calendarId,
+            }
           );
 
-          if (!result.success) {
+          if (!allEventsResult.success) {
             return {
               content: [
                 {
                   type: "text",
-                  text: `Error searching calendar events: ${result.error}`,
+                  text: `Error searching calendar events: ${allEventsResult.error}`,
                 },
               ],
             };
           }
+
+          // Filter events by search query
+          const searchLower = searchQuery.toLowerCase();
+          const filteredEvents = (allEventsResult.events || []).filter(event =>
+            event.subject?.toLowerCase().includes(searchLower) ||
+            event.description?.toLowerCase().includes(searchLower) ||
+            event.location?.toLowerCase().includes(searchLower) ||
+            event.attendees?.some(a => 
+              a.name?.toLowerCase().includes(searchLower) ||
+              a.email?.toLowerCase().includes(searchLower)
+            )
+          );
+
+          // Format events for display
+          let formattedEvents = '📅 No events found matching your search query';
+          if (filteredEvents.length > 0) {
+            formattedEvents = `📅 **${filteredEvents.length} Event(s) Found**\n\n`;
+            filteredEvents.forEach((event, index) => {
+              const startDate = new Date(event.start.dateTime);
+              const endDate = new Date(event.end.dateTime);
+              const formattedDate = startDate.toLocaleDateString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+              });
+              const startTime = startDate.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+              });
+              const endTime = endDate.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+              });
+
+              formattedEvents += `**${index + 1}. ${event.subject || 'Untitled'}**\n`;
+              formattedEvents += `📅 ${formattedDate} • 🕐 ${startTime}-${endTime}\n`;
+              if (event.location) {
+                formattedEvents += `📍 ${event.location}\n`;
+              }
+              if (event.onlineMeetingUrl) {
+                formattedEvents += `💻 Meeting: ${event.onlineMeetingUrl}\n`;
+              }
+              formattedEvents += `🆔 ${event.id}\n\n`;
+            });
+            formattedEvents = formattedEvents.trim();
+          }
+
+          const result = {
+            success: true,
+            events: filteredEvents,
+            formattedEvents,
+          };
 
           let responseText = `**Calendar Event Search Results** (Client ID: ${numericClientId})\n\n`;
           responseText += `**Search Query**: "${searchQuery}"\n`;
@@ -1096,7 +1240,8 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await FinalOptimizedCalendarOperations.getCalendarsForClient(numericClientId);
+          // Use unified CalendarService (supports both Microsoft and Google)
+          const result = await CalendarService.getCalendars(numericClientId);
 
           if (!result.success) {
             return {
@@ -1119,10 +1264,8 @@ const handler = createMcpHandler(
             result.calendars.forEach((calendar, index) => {
               responseText += `**${index + 1}. ${calendar.name}**\n`;
               responseText += `- **ID**: \`${calendar.id}\`\n`;
-              responseText += `- **Default**: ${calendar.isDefault ? "✅ Yes" : "❌ No"}\n`;
+              responseText += `- **Primary**: ${calendar.isPrimary ? "✅ Yes" : "❌ No"}\n`;
               responseText += `- **Can Edit**: ${calendar.canEdit ? "✅ Yes" : "❌ No"}\n`;
-              
-              responseText += `- **Owner**: ${calendar.owner}\n`;
               
               responseText += `\n`;
             });
@@ -1182,7 +1325,8 @@ const handler = createMcpHandler(
             };
           }
 
-          const summary = await FinalOptimizedCalendarOperations.checkClientCalendarConnection(numericClientId);
+          // Use unified CalendarService (supports both Microsoft and Google)
+          const summary = await CalendarService.checkConnection(numericClientId);
 
           if (!summary) {
             return {
@@ -1206,22 +1350,19 @@ const handler = createMcpHandler(
               responseText += `**User Name**: ${details.userName}\n`;
               responseText += `**Connected At**: ${new Date(details.connectedAt).toLocaleDateString()}\n`;
               
-              if (details.lastSync) {
-                responseText += `**Last Sync**: ${new Date(details.lastSync).toLocaleDateString()}\n`;
-              }
               
               if (details.calendarsCount !== undefined) {
                 responseText += `**Available Calendars**: ${details.calendarsCount}\n`;
               }
             }
             
-            responseText += `\nThis client can access calendar events through Microsoft Graph.`;
+            responseText += `\nThis client can access calendar events through their connected calendar.`;
           } else {
             responseText += `**Status**: ❌ Not connected\n`;
             if (summary.error) {
               responseText += `**Error**: ${summary.error}\n`;
             }
-            responseText += `\nThis client needs to connect their Microsoft calendar before accessing events.`;
+            responseText += `\nThis client needs to connect their calendar before accessing events.`;
           }
 
           return {
@@ -1280,7 +1421,7 @@ const handler = createMcpHandler(
             intervalInMinutes,
           } = input;
           
-          console.log("get availability (Microsoft Graph)");
+          console.log("get availability (Calendar MCP)");
           console.table(input);
 
           // Convert and validate clientId
@@ -1306,8 +1447,21 @@ const handler = createMcpHandler(
             intervalInMinutes,
           };
 
-          // Use legacy function for availability (not yet optimized)
-          const result = await FinalOptimizedCalendarOperations.getAvailabilityForClient(numericClientId, request);
+          // Get client timezone
+          const clientData = await AdvancedCacheService.getClientCalendarData(numericClientId);
+          const timeZone = clientData?.timezone || 'UTC';
+
+          // Use unified CalendarService (supports both Microsoft and Google)
+          const result = await CalendarService.getAvailability(
+            numericClientId,
+            {
+              emails: emails || [],
+              startDateTime: startDate,
+              endDateTime: endDate,
+              timeZone,
+              intervalInMinutes,
+            }
+          );
 
           if (!result.success) {
             return {
@@ -1331,18 +1485,18 @@ const handler = createMcpHandler(
             result.availability.forEach((person) => {
               responseText += `**👤 ${person.email}:**\n`;
               
-              if (person.availability.length === 0) {
+              if (!person.slots || person.slots.length === 0) {
                 responseText += ` No busy times - Available for the entire period\n`;
               } else {
-                person.availability.forEach((slot, index) => {
+                person.slots.forEach((slot, index) => {
                   const startTime = new Date(slot.start).toLocaleString("en-US");
                   const endTime = new Date(slot.end).toLocaleString("en-US");
                   responseText += `   ${index + 1}. **${slot.status.toUpperCase()}**: ${startTime} - ${endTime}\n`;
                 });
               }
               
-                      responseText += `\n`;
-                    });
+              responseText += `\n`;
+            });
           }
 
           return {
@@ -1403,7 +1557,7 @@ const handler = createMcpHandler(
             maxSuggestions,
           } = input;
           
-          console.log("find available slots (Microsoft Graph)");
+          console.log("find available slots (Calendar MCP)");
           console.table(input);
 
           // Convert and validate clientId
@@ -1421,12 +1575,15 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await FinalOptimizedCalendarOperations.findAvailableSlotsForClient(
+          // Use unified CalendarService (supports both Microsoft and Google)
+          const result = await CalendarService.findAvailableSlots(
             numericClientId,
             requestedStartTime,
             requestedEndTime,
-            durationMinutes || 60,
-            maxSuggestions || 5
+            {
+              durationMinutes: durationMinutes || 60,
+              maxSuggestions: maxSuggestions || 5,
+            }
           );
 
           if (!result.success) {
