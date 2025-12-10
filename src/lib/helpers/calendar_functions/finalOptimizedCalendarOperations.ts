@@ -498,13 +498,9 @@ export class FinalOptimizedCalendarOperations {
 
       const { connection } = clientData
 
-      // Get calendars using direct Graph API call
-      const response = await fetch('https://graph.microsoft.com/v1.0/me/calendars', {
-        headers: {
-          'Authorization': `Bearer ${connection.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      // Get calendars using validated Graph API call
+      const { makeGraphRequest } = await import('./graphHelper')
+      const response = await makeGraphRequest(connection, '/me/calendars')
 
       if (!response.ok) {
         return { success: false, error: `Failed to fetch calendars: ${response.statusText}` }
@@ -572,13 +568,9 @@ export class FinalOptimizedCalendarOperations {
 
       const { connection } = clientData
 
-      // Test connection by making a simple API call
-      const testResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-        headers: {
-          'Authorization': `Bearer ${connection.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      // Test connection by making a simple API call with validated token
+      const { makeGraphRequest } = await import('./graphHelper')
+      const testResponse = await makeGraphRequest(connection, '/me')
 
       if (!testResponse.ok) {
         return {
@@ -588,13 +580,8 @@ export class FinalOptimizedCalendarOperations {
         }
       }
 
-      // Get calendars count
-      const calendarsResponse = await fetch('https://graph.microsoft.com/v1.0/me/calendars', {
-        headers: {
-          'Authorization': `Bearer ${connection.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      // Get calendars count with validated token
+      const calendarsResponse = await makeGraphRequest(connection, '/me/calendars')
 
       let calendarsCount = 0
       if (calendarsResponse.ok) {
@@ -664,26 +651,27 @@ export class FinalOptimizedCalendarOperations {
       const emailsToCheck = request.emails || [connection.email]
       const intervalMinutes = request.intervalInMinutes || 60
 
-      // Get free/busy information using direct Graph API
-      const freeBusyResponse = await fetch('https://graph.microsoft.com/v1.0/me/calendar/getSchedule', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${connection.access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          schedules: emailsToCheck,
-          startTime: {
-            dateTime: request.startDate,
-            timeZone: clientTimezone || 'UTC'
-          },
-          endTime: {
-            dateTime: request.endDate,
-            timeZone: clientTimezone || 'UTC'
-          },
-          availabilityViewInterval: intervalMinutes
-        })
-      })
+      // Get free/busy information using validated Graph API
+      const { makeGraphRequest } = await import('./graphHelper')
+      const freeBusyResponse = await makeGraphRequest(
+        connection,
+        '/me/calendar/getSchedule',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            schedules: emailsToCheck,
+            startTime: {
+              dateTime: request.startDate,
+              timeZone: clientTimezone || 'UTC'
+            },
+            endTime: {
+              dateTime: request.endDate,
+              timeZone: clientTimezone || 'UTC'
+            },
+            availabilityViewInterval: intervalMinutes
+          })
+        }
+      )
 
       if (!freeBusyResponse.ok) {
         return { success: false, error: `Failed to get availability: ${freeBusyResponse.statusText}` }

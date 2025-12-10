@@ -31,7 +31,19 @@ export async function getCalendarConnectionByClientId(clientId: number): Promise
       throw error
     }
     
-    return data as GraphCalendarConnection
+    const connection = data as GraphCalendarConnection
+    
+    // Validate token format when retrieving from database
+    if (connection && connection.access_token) {
+      const tokenParts = connection.access_token.split('.')
+      if (tokenParts.length !== 3) {
+        console.error(`⚠️ WARNING: Invalid JWT token format in database for connection ${connection.id}`)
+        console.error(`Token has ${tokenParts.length} parts (expected 3). Token preview: ${connection.access_token.substring(0, 30)}...`)
+        console.error('This connection may need to be re-authenticated.')
+      }
+    }
+    
+    return connection
   } catch (error) {
     console.error('Error getting calendar connection:', error)
     return null

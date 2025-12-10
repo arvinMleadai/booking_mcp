@@ -97,6 +97,12 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
       throw new Error('No refresh token available')
     }
 
+    // Validate refresh token format
+    if (!isValidJWT(connection.refresh_token)) {
+      console.error('❌ Invalid refresh token format. Cannot refresh access token.')
+      throw new Error('Invalid refresh token format. Please reconnect the calendar.')
+    }
+
     const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
       method: 'POST',
       headers: {
@@ -113,10 +119,18 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
 
     if (!response.ok) {
       const error = await response.json()
-      throw new Error(`Token refresh failed: ${error.error_description || error.error}`)
+      const errorMessage = `Token refresh failed: ${error.error_description || error.error}`
+      console.error('❌', errorMessage)
+      throw new Error(errorMessage)
     }
 
     const tokenData: GraphTokenResponse = await response.json()
+    
+    // Validate the new access token format
+    if (!isValidJWT(tokenData.access_token)) {
+      console.error('❌ Token refresh returned invalid JWT format')
+      throw new Error('Token refresh returned invalid JWT format. Please reconnect the calendar.')
+    }
     
     // Update the connection in database with new tokens
     const { updateCalendarConnectionTokens } = await import('./graphDatabase')
@@ -126,9 +140,10 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
       expires_at: new Date(Date.now() + tokenData.expires_in * 1000).toISOString(),
     })
 
+    console.log('✅ Token refreshed and saved successfully')
     return tokenData
   } catch (error) {
-    console.error('Error refreshing Graph token:', error)
+    console.error('❌ Error refreshing Graph token:', error)
     return null
   }
 }
@@ -137,6 +152,19 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
 /**
  * Make authenticated request to Microsoft Graph API
  */
+/**
+ * Validate JWT token format (should have 3 parts separated by dots)
+ */
+function isValidJWT(token: string): boolean {
+  if (!token || typeof token !== 'string') {
+    return false
+  }
+  
+  const parts = token.split('.')
+  // Valid JWT should have exactly 3 parts (header.payload.signature)
+  return parts.length === 3 && parts.every(part => part.length > 0)
+}
+
 export async function makeGraphRequest(
   connection: GraphCalendarConnection,
   endpoint: string,
@@ -152,10 +180,29 @@ export async function makeGraphRequest(
   
   let accessToken = connection.access_token
   
+  // Validate token format before using it
+  if (!isValidJWT(accessToken)) {
+    console.error('❌ Invalid JWT token format detected. Token has incorrect structure.')
+    console.error(`Token preview: ${accessToken?.substring(0, 20)}... (length: ${accessToken?.length})`)
+    console.error('Attempting to refresh token...')
+    
+    // Try to refresh the token
+    const refreshedToken = await refreshGraphToken(connection)
+    if (refreshedToken && isValidJWT(refreshedToken.access_token)) {
+      accessToken = refreshedToken.access_token
+      console.log('✅ Token refreshed successfully')
+    } else {
+      throw new Error('Invalid access token format. Token must be a valid JWT with 3 parts (header.payload.signature). Please reconnect the calendar.')
+    }
+  }
+  
   if (expiresAt <= fiveMinutesFromNow) {
     console.log('Token expires soon, refreshing...')
     const refreshedToken = await refreshGraphToken(connection)
     if (refreshedToken) {
+      if (!isValidJWT(refreshedToken.access_token)) {
+        throw new Error('Token refresh returned invalid JWT format. Please reconnect the calendar.')
+      }
       accessToken = refreshedToken.access_token
     } else {
       throw new Error('Failed to refresh access token')
