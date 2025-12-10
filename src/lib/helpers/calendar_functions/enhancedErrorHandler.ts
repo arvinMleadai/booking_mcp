@@ -223,50 +223,8 @@ export class EnhancedErrorHandler {
       }
     }
 
-    // All retries failed, try fallback options
-    if (fallbackOptions.gracefulDegradation) {
-      return await this.handleGracefulDegradation(lastError!, context, fallbackOptions)
-    }
-
     // No fallback available, throw the error
     throw lastError
-  }
-
-  /**
-   * Handle graceful degradation when primary operation fails
-   */
-  private static async handleGracefulDegradation<T>(
-    error: Error,
-    context: ErrorContext,
-    options: FallbackOptions<T>
-  ): Promise<T> {
-    console.log(`🛡️ Attempting graceful degradation for ${context.operation}`)
-
-    // Try custom fallback first
-    if (options.customFallback) {
-      try {
-        return await options.customFallback()
-      } catch (fallbackError) {
-        console.error('Custom fallback failed:', fallbackError)
-      }
-    }
-
-    // Try cached data
-    if (options.useCachedData && context.clientId) {
-      try {
-        return await this.getCachedFallback<T>(context)
-      } catch (cacheError) {
-        console.error('Cached fallback failed:', cacheError)
-      }
-    }
-
-    // Try simplified response
-    if (options.useSimplifiedResponse) {
-      return this.getSimplifiedResponse<T>(context)
-    }
-
-    // No fallback worked, throw original error
-    throw error
   }
 
   /**
