@@ -12,6 +12,7 @@ import type {
   GraphFreeBusyResponse,
 } from '@/types'
 import { DateTime } from "luxon"
+import { refresh } from 'next/cache'
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0'
 
 /**
@@ -117,6 +118,7 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
       }),
     })
 
+    console.log(connection.refresh_token)
     if (!response.ok) {
       const error = await response.json()
       const errorMessage = `Token refresh failed: ${error.error_description || error.error}`
