@@ -11,6 +11,7 @@ import { EnhancedGraphApiService } from './enhancedGraphApiService'
 import { OptimizedConflictDetection } from './optimizedConflictDetection'
 import { parseGraphDateRequest, formatGraphEventsAsString } from './graphHelper'
 
+console.log("Changes")
 /**
  * Final optimized calendar operations with all performance enhancements
  */
@@ -650,6 +651,7 @@ export class FinalOptimizedCalendarOperations {
       // Use organizer email if no emails specified
       const emailsToCheck = request.emails || [connection.email]
       const intervalMinutes = request.intervalInMinutes || 60
+
 
       // Get free/busy information using validated Graph API
       const { makeGraphRequest } = await import('./graphHelper')
