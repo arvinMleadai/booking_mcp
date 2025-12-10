@@ -72,9 +72,8 @@ export class CalendarService {
 
       const provider = this.getProvider(connection)
       
-      // Get timezone
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
-      const timeZone = clientData?.timezone || 'UTC'
+      // Get timezone directly from database (don't need calendar connection for this)
+      const timeZone = await AdvancedCacheService.getClientTimezone(clientId) || 'UTC'
 
       // Parse date request if provided
       let startDateTime = request.startDateTime
@@ -152,9 +151,8 @@ export class CalendarService {
 
       const provider = this.getProvider(connection)
       
-      // Get timezone
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
-      const timeZone = clientData?.timezone || 'UTC'
+      // Get timezone directly from database (don't need calendar connection for this)
+      const timeZone = await AdvancedCacheService.getClientTimezone(clientId) || 'UTC'
 
       // Check for conflicts (optional - can be enhanced)
       const conflictCheck = await this.checkConflicts(
@@ -231,9 +229,8 @@ export class CalendarService {
 
       const provider = this.getProvider(connection)
       
-      // Get timezone
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
-      const timeZone = clientData?.timezone || 'UTC'
+      // Get timezone directly from database (don't need calendar connection for this)
+      const timeZone = await AdvancedCacheService.getClientTimezone(clientId) || 'UTC'
 
       const result = await provider.updateEvent(connection, eventId, {
         ...request,
@@ -504,8 +501,10 @@ export class CalendarService {
 
       // Use optimized conflict detection if available
       const { OptimizedConflictDetection } = await import('./optimizedConflictDetection')
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
-      const timeZone = clientData?.timezone || 'UTC'
+      
+      // Get timezone directly from database (don't need calendar connection for this)
+      // Use agent timezone if provided, otherwise get from client database
+      const timeZone = options.agentTimezone || await AdvancedCacheService.getClientTimezone(clientId) || 'UTC'
 
       const result = await OptimizedConflictDetection.findAvailableSlots(
         connection,

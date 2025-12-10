@@ -75,26 +75,35 @@ export async function getCalendarConnectionByAgentId(
       }
     }
     
-    // Step 4: Validate token format and provider
+    // Step 4: Validate token provider matches calendar provider
+    // Note: Google tokens are NOT JWT format (they're just strings like "ya29.xxx")
+    // Only Microsoft tokens are JWT format (3 parts separated by dots)
     if (calendarConnection.access_token) {
-      const tokenParts = calendarConnection.access_token.split('.')
-      if (tokenParts.length !== 3) {
-        console.error(`⚠️ WARNING: Invalid JWT token format in database for connection ${calendarConnection.id}`)
-        console.error(`Token has ${tokenParts.length} parts (expected 3). Token preview: ${calendarConnection.access_token.substring(0, 30)}...`)
-        return null
-      }
-      
-      // Validate token provider matches calendar provider
-      const isMicrosoft = isMicrosoftToken(calendarConnection.access_token)
-      if (calendarConnection.provider_name === 'microsoft' && !isMicrosoft) {
-        console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token appears to be Google (starts with 'ya29.' or '1//')`)
-        console.error(`Token preview: ${calendarConnection.access_token.substring(0, 50)}...`)
-        return null
-      }
-      
-      if (calendarConnection.provider_name === 'google' && isMicrosoft) {
-        console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Google but token appears to be Microsoft`)
-        return null
+      if (calendarConnection.provider_name === 'microsoft') {
+        // Microsoft tokens must be JWT format (3 parts)
+        const tokenParts = calendarConnection.access_token.split('.')
+        if (tokenParts.length !== 3) {
+          console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token is not JWT format`)
+          console.error(`Token has ${tokenParts.length} parts (expected 3 for JWT). Token preview: ${calendarConnection.access_token.substring(0, 30)}...`)
+          return null
+        }
+        
+        // Check if it's actually a Google token (wrong provider)
+        const isGoogleToken = calendarConnection.access_token.startsWith('ya29.') || calendarConnection.access_token.startsWith('1//')
+        if (isGoogleToken) {
+          console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token is Google format (ya29. or 1//)`)
+          console.error(`Token preview: ${calendarConnection.access_token.substring(0, 50)}...`)
+          return null
+        }
+      } else if (calendarConnection.provider_name === 'google') {
+        // Google tokens are NOT JWT - they're just strings
+        // Check if it's actually a Microsoft JWT token (wrong provider)
+        const tokenParts = calendarConnection.access_token.split('.')
+        const isMicrosoftJWT = tokenParts.length === 3 && !calendarConnection.access_token.startsWith('ya29.') && !calendarConnection.access_token.startsWith('1//')
+        if (isMicrosoftJWT) {
+          console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Google but token appears to be Microsoft JWT format`)
+          return null
+        }
       }
     }
     
@@ -150,27 +159,34 @@ export async function getCalendarConnectionByClientId(
     
     const connection = data as GraphCalendarConnection
     
-    // Validate token format when retrieving from database
+    // Validate token provider matches calendar provider
+    // Note: Google tokens are NOT JWT format - only Microsoft tokens are JWT
     if (connection && connection.access_token) {
-      const tokenParts = connection.access_token.split('.')
-      if (tokenParts.length !== 3) {
-        console.error(`⚠️ WARNING: Invalid JWT token format in database for connection ${connection.id}`)
-        console.error(`Token has ${tokenParts.length} parts (expected 3). Token preview: ${connection.access_token.substring(0, 30)}...`)
-        console.error('This connection may need to be re-authenticated.')
-        return null
-      }
-      
-      // Validate token provider matches calendar provider
-      const isMicrosoft = isMicrosoftToken(connection.access_token)
-      if (connection.provider_name === 'microsoft' && !isMicrosoft) {
-        console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token appears to be Google`)
-        console.error(`Token preview: ${connection.access_token.substring(0, 50)}...`)
-        return null
-      }
-      
-      if (connection.provider_name === 'google' && isMicrosoft) {
-        console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Google but token appears to be Microsoft`)
-        return null
+      if (connection.provider_name === 'microsoft') {
+        // Microsoft tokens must be JWT format (3 parts)
+        const tokenParts = connection.access_token.split('.')
+        if (tokenParts.length !== 3) {
+          console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token is not JWT format`)
+          console.error(`Token has ${tokenParts.length} parts (expected 3 for JWT). Token preview: ${connection.access_token.substring(0, 30)}...`)
+          return null
+        }
+        
+        // Check if it's actually a Google token (wrong provider)
+        const isGoogleToken = connection.access_token.startsWith('ya29.') || connection.access_token.startsWith('1//')
+        if (isGoogleToken) {
+          console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token is Google format`)
+          console.error(`Token preview: ${connection.access_token.substring(0, 50)}...`)
+          return null
+        }
+      } else if (connection.provider_name === 'google') {
+        // Google tokens are NOT JWT - they're just strings like "ya29.xxx"
+        // Check if it's actually a Microsoft JWT token (wrong provider)
+        const tokenParts = connection.access_token.split('.')
+        const isMicrosoftJWT = tokenParts.length === 3 && !connection.access_token.startsWith('ya29.') && !connection.access_token.startsWith('1//')
+        if (isMicrosoftJWT) {
+          console.error(`❌ TOKEN PROVIDER MISMATCH: Calendar is Google but token appears to be Microsoft JWT format`)
+          return null
+        }
       }
     }
     
