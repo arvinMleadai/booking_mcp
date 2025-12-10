@@ -12,7 +12,6 @@ import type {
   GraphFreeBusyResponse,
 } from '@/types'
 import { DateTime } from "luxon"
-import { refresh } from 'next/cache'
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0'
 
 /**
@@ -90,7 +89,9 @@ export async function getCalendarConnection(): Promise<GraphCalendarConnection |
 }
 
 /**
- * Refresh Microsoft Graph access token
+ * Refresh Microsoft Graph access token using existing refresh_token
+ * No authentication needed - calendar is already authenticated
+ * Just uses the refresh_token from the connection to get a new access_token
  */
 export async function refreshGraphToken(connection: GraphCalendarConnection): Promise<GraphTokenResponse | null> {
   try {
@@ -104,6 +105,8 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
       throw new Error('Invalid refresh token format. Please reconnect the calendar.')
     }
 
+    // Use existing refresh_token to get new access_token
+    // No OAuth flow - just token refresh
     const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
       method: 'POST',
       headers: {
@@ -118,7 +121,6 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
       }),
     })
 
-    console.log(connection.refresh_token)
     if (!response.ok) {
       const error = await response.json()
       const errorMessage = `Token refresh failed: ${error.error_description || error.error}`

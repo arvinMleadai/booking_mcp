@@ -227,11 +227,11 @@ export const getAgentWithCalendarByUUID = async (
       };
     }
 
-    // Get calendar connection from lead_dialer schema
+    // Get calendar connection from lead_dialer schema with full token details
     const { data: calendarConnection, error: calendarError } = await supabase
       .schema("lead_dialer")
       .from("calendar_connections")
-      .select("id, client_id, provider_id, provider_name, email, display_name, is_connected")
+      .select("id, client_id, provider_id, provider_name, email, display_name, is_connected, access_token, refresh_token, expires_at")
       .eq("id", assignment.calendar_id)
       .single();
 
@@ -244,6 +244,35 @@ export const getAgentWithCalendarByUUID = async (
           calendar_connections: null,
         },
       };
+    }
+
+    // Validate token provider matches calendar provider
+    if (calendarConnection.access_token) {
+      const tokenParts = calendarConnection.access_token.split('.');
+      const isGoogleToken = calendarConnection.access_token.startsWith('ya29.') || calendarConnection.access_token.startsWith('1//');
+      
+      if (calendarConnection.provider_name === 'microsoft' && isGoogleToken) {
+        console.error(`❌ TOKEN PROVIDER MISMATCH for agent ${agentUUID}: Calendar is Microsoft but token is Google`);
+        console.error(`Token preview: ${calendarConnection.access_token.substring(0, 50)}...`);
+        return {
+          ...agent,
+          calendar_assignment: {
+            ...assignment,
+            calendar_connections: null,
+          },
+        };
+      }
+      
+      if (calendarConnection.provider_name === 'google' && !isGoogleToken) {
+        console.error(`❌ TOKEN PROVIDER MISMATCH for agent ${agentUUID}: Calendar is Google but token is Microsoft`);
+        return {
+          ...agent,
+          calendar_assignment: {
+            ...assignment,
+            calendar_connections: null,
+          },
+        };
+      }
     }
 
     return {

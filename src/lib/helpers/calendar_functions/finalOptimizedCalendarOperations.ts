@@ -4,6 +4,7 @@ import type {
   CreateGraphEventRequest,
   GetGraphEventsRequest,
   CreateGraphEventMCPRequest,
+  GraphCalendarConnection,
 } from '@/types'
 
 import { AdvancedCacheService } from '../cache/advancedCacheService'
@@ -98,10 +99,12 @@ export class FinalOptimizedCalendarOperations {
 
   /**
    * Create calendar event with full optimization and enhanced conflict detection
+   * @param agentId - Optional agent ID to use agent's assigned calendar connection
    */
   static async createCalendarEventForClient(
     clientId: number,
-    request: CreateGraphEventMCPRequest
+    request: CreateGraphEventMCPRequest,
+    agentId?: string
   ): Promise<{
     success: boolean
     event?: GraphEvent
@@ -116,8 +119,25 @@ export class FinalOptimizedCalendarOperations {
     }>
   }> {
     try {
-      // Get all client data with advanced caching
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      // Get client data - use agent-specific calendar if agentId provided
+      let clientData: Awaited<ReturnType<typeof AdvancedCacheService.getClientCalendarData>> | null
+      
+      if (agentId) {
+        console.log(`📌 Using agent-specific calendar connection for agent ${agentId}`)
+        // Get agent's assigned calendar connection (must be Microsoft for Graph API)
+        clientData = await AdvancedCacheService.getClientCalendarDataByAgentId(agentId, clientId, 'microsoft')
+        
+        if (!clientData) {
+          return {
+            success: false,
+            error: `Agent ${agentId} does not have a Microsoft calendar connection assigned. Please assign a Microsoft calendar to this agent.`
+          }
+        }
+      } else {
+        // Fallback to client's calendar (prefer Microsoft)
+        clientData = await AdvancedCacheService.getClientCalendarData(clientId, 'microsoft')
+      }
+      
       if (!clientData) {
         return {
           success: false,
@@ -126,6 +146,14 @@ export class FinalOptimizedCalendarOperations {
       }
 
       const { connection, timezone, agentOfficeHours, agentTimezone } = clientData
+      
+      // Validate provider is Microsoft (required for Microsoft Graph API)
+      if (connection.provider_name !== 'microsoft') {
+        return {
+          success: false,
+          error: `Calendar provider mismatch: Expected Microsoft calendar, but found ${connection.provider_name}. Please use a Microsoft calendar for this operation.`
+        }
+      }
 
       if (!connection.is_connected) {
         return {
@@ -283,21 +311,38 @@ export class FinalOptimizedCalendarOperations {
 
   /**
    * Update calendar event with enhanced error handling
+   * @param agentId - Optional agent ID to use agent's assigned calendar connection
    */
   static async updateCalendarEventForClient(
     clientId: number,
     eventId: string,
-    updates: Partial<CreateGraphEventMCPRequest>
+    updates: Partial<CreateGraphEventMCPRequest>,
+    agentId?: string
   ): Promise<{
     success: boolean
     event?: GraphEvent
     error?: string
   }> {
     try {
-      console.log(`🚀 FINAL OPTIMIZED: Updating calendar event ${eventId} for client ${clientId}`)
+      console.log(`🚀 FINAL OPTIMIZED: Updating calendar event ${eventId} for client ${clientId}${agentId ? ` (agent: ${agentId})` : ''}`)
       
-      // Get calendar connection with advanced caching
-      const connection = await AdvancedCacheService.getCalendarConnection(clientId)
+      // Get calendar connection - use agent-specific if agentId provided
+      let connection: GraphCalendarConnection | null
+      
+      if (agentId) {
+        console.log(`📌 Using agent-specific calendar connection for agent ${agentId}`)
+        connection = await AdvancedCacheService.getCalendarConnectionByAgentId(agentId, clientId, 'microsoft')
+        
+        if (!connection) {
+          return {
+            success: false,
+            error: `Agent ${agentId} does not have a Microsoft calendar connection assigned. Please assign a Microsoft calendar to this agent.`,
+          }
+        }
+      } else {
+        connection = await AdvancedCacheService.getCalendarConnection(clientId, 'microsoft')
+      }
+      
       if (!connection) {
         return {
           success: false,
@@ -309,6 +354,14 @@ export class FinalOptimizedCalendarOperations {
         return {
           success: false,
           error: 'Calendar connection is not active. Please reconnect your Microsoft calendar.',
+        }
+      }
+      
+      // Validate provider is Microsoft
+      if (connection.provider_name !== 'microsoft') {
+        return {
+          success: false,
+          error: `Calendar provider mismatch: Expected Microsoft calendar, but found ${connection.provider_name}. Please use a Microsoft calendar for this operation.`,
         }
       }
 
@@ -398,20 +451,37 @@ export class FinalOptimizedCalendarOperations {
 
   /**
    * Delete calendar event with enhanced error handling
+   * @param agentId - Optional agent ID to use agent's assigned calendar connection
    */
   static async deleteCalendarEventForClient(
     clientId: number,
     eventId: string,
-    calendarId?: string
+    calendarId?: string,
+    agentId?: string
   ): Promise<{
     success: boolean
     error?: string
   }> {
     try {
-      console.log(`🚀 FINAL OPTIMIZED: Deleting calendar event ${eventId} for client ${clientId}`)
+      console.log(`🚀 FINAL OPTIMIZED: Deleting calendar event ${eventId} for client ${clientId}${agentId ? ` (agent: ${agentId})` : ''}`)
       
-      // Get calendar connection with advanced caching
-      const connection = await AdvancedCacheService.getCalendarConnection(clientId)
+      // Get calendar connection - use agent-specific if agentId provided
+      let connection: GraphCalendarConnection | null
+      
+      if (agentId) {
+        console.log(`📌 Using agent-specific calendar connection for agent ${agentId}`)
+        connection = await AdvancedCacheService.getCalendarConnectionByAgentId(agentId, clientId, 'microsoft')
+        
+        if (!connection) {
+          return {
+            success: false,
+            error: `Agent ${agentId} does not have a Microsoft calendar connection assigned. Please assign a Microsoft calendar to this agent.`,
+          }
+        }
+      } else {
+        connection = await AdvancedCacheService.getCalendarConnection(clientId, 'microsoft')
+      }
+      
       if (!connection) {
         return {
           success: false,
@@ -423,6 +493,14 @@ export class FinalOptimizedCalendarOperations {
         return {
           success: false,
           error: 'Calendar connection is not active. Please reconnect your Microsoft calendar.',
+        }
+      }
+      
+      // Validate provider is Microsoft
+      if (connection.provider_name !== 'microsoft') {
+        return {
+          success: false,
+          error: `Calendar provider mismatch: Expected Microsoft calendar, but found ${connection.provider_name}. Please use a Microsoft calendar for this operation.`,
         }
       }
 
@@ -717,6 +795,7 @@ export class FinalOptimizedCalendarOperations {
 
   /**
    * Find available time slots with enhanced optimization
+   * @param agentId - Optional agent ID to use agent's assigned calendar connection
    */
   static async findAvailableSlotsForClient(
     clientId: number,
@@ -725,7 +804,8 @@ export class FinalOptimizedCalendarOperations {
     durationMinutes: number = 60,
     maxSuggestions: number = 3,
     overrideOfficeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
-    overrideTimezone?: string
+    overrideTimezone?: string,
+    agentId?: string
   ): Promise<{
     success: boolean
     hasConflict: boolean
@@ -740,10 +820,28 @@ export class FinalOptimizedCalendarOperations {
     error?: string
   }> {
     try {
-      console.log(`🚀 FINAL OPTIMIZED: Finding available slots for client ${clientId}`)
+      console.log(`🚀 FINAL OPTIMIZED: Finding available slots for client ${clientId}${agentId ? ` (agent: ${agentId})` : ''}`)
       
-      // Get all client data with advanced caching
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      // Get client data - use agent-specific calendar if agentId provided
+      let clientData: Awaited<ReturnType<typeof AdvancedCacheService.getClientCalendarData>> | null
+      
+      if (agentId) {
+        console.log(`📌 Using agent-specific calendar connection for agent ${agentId}`)
+        // Get agent's assigned calendar connection (must be Microsoft for Graph API)
+        clientData = await AdvancedCacheService.getClientCalendarDataByAgentId(agentId, clientId, 'microsoft')
+        
+        if (!clientData) {
+          return {
+            success: false,
+            hasConflict: false,
+            error: `Agent ${agentId} does not have a Microsoft calendar connection assigned. Please assign a Microsoft calendar to this agent.`
+          }
+        }
+      } else {
+        // Fallback to client's calendar (prefer Microsoft)
+        clientData = await AdvancedCacheService.getClientCalendarData(clientId, 'microsoft')
+      }
+      
       if (!clientData) {
         return {
           success: false,
@@ -753,6 +851,15 @@ export class FinalOptimizedCalendarOperations {
       }
 
       const { connection, timezone, agentOfficeHours, agentTimezone } = clientData
+      
+      // Validate provider is Microsoft (required for Microsoft Graph API)
+      if (connection.provider_name !== 'microsoft') {
+        return {
+          success: false,
+          hasConflict: false,
+          error: `Calendar provider mismatch: Expected Microsoft calendar, but found ${connection.provider_name}. Please use a Microsoft calendar for this operation.`
+        }
+      }
 
       if (!connection.is_connected) {
         return {

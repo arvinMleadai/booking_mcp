@@ -3,7 +3,8 @@
  * Handles customer appointment booking with agent calendar integration
  */
 
-import { FinalOptimizedCalendarOperations } from "../calendar_functions/finalOptimizedCalendarOperations";
+import { CalendarService } from "../calendar_functions/calendar-service";
+import type { CreateEventRequest } from "../calendar_functions/providers/types";
 import {
   getAgentWithCalendarByUUID,
   getAgentsForClient,
@@ -205,31 +206,37 @@ export class BookingOperations {
         console.log(`Requested time is within office hours`);
       }
 
-      // Step 6: Create calendar event using the optimized operations
+      // Step 6: Create calendar event using unified CalendarService
       // Generate a simple default description if none provided
       const defaultDescription = request.description || 
         `Scheduled appointment with ${customerDisplayName}`;
 
-      const calendarRequest = {
-        clientId: request.clientId,
+      console.log(`Creating calendar event via ${validation.calendarProvider}`);
+
+      // Get client timezone
+      const clientData = await import('../cache/advancedCacheService').then(m => 
+        m.AdvancedCacheService.getClientCalendarData(request.clientId)
+      );
+      const timeZone = clientData?.timezone || 'Australia/Melbourne';
+
+      // Use unified CalendarService (supports both Microsoft and Google)
+      const calendarServiceRequest: CreateEventRequest = {
         subject: request.subject,
         startDateTime: request.startDateTime,
         endDateTime: request.endDateTime,
-        attendeeEmail: customerEmail,
-        attendeeName: customerDisplayName,
+        timeZone,
         description: defaultDescription,
         location: request.location,
+        attendeeEmail: customerEmail,
+        attendeeName: customerDisplayName,
         isOnlineMeeting: request.isOnlineMeeting,
-        calendarId: request.calendarId, // undefined = use agent's primary calendar
       };
 
-      console.log(`Creating calendar event via ${validation.calendarProvider}`);
-
-      const result =
-        await FinalOptimizedCalendarOperations.createCalendarEventForClient(
-          request.clientId,
-          calendarRequest
-        );
+      const result = await CalendarService.createEvent(
+        request.clientId,
+        calendarServiceRequest,
+        request.agentId // Pass agentId to use agent's assigned calendar
+      );
 
       if (!result.success) {
         // Map available slots if present (from conflict detection)
@@ -260,9 +267,29 @@ export class BookingOperations {
 
       console.log(`Appointment booked successfully: ${result.eventId}`);
 
+      // Map CalendarEvent to BookingOperationResponse format
+      const bookingEvent = result.event ? {
+        id: result.event.id,
+        subject: result.event.subject,
+        start: result.event.start,
+        end: result.event.end,
+        location: result.event.location ? {
+          displayName: result.event.location,
+        } : undefined,
+        attendees: result.event.attendees?.map(a => ({
+          emailAddress: {
+            name: a.name,
+            address: a.email,
+          },
+        })),
+        onlineMeeting: result.event.onlineMeetingUrl ? {
+          joinUrl: result.event.onlineMeetingUrl,
+        } : undefined,
+      } : undefined;
+
       return {
         success: true,
-        event: result.event,
+        event: bookingEvent,
         eventId: result.eventId,
         customer: customer || undefined,
         agent: agent as unknown as AgentWithCalendar,
@@ -352,17 +379,19 @@ export class BookingOperations {
         console.log(`No office hours configured for ${agent.name}`);
       }
 
-      // Use calendar operations to find slots with agent-specific office hours
-      const result =
-        await FinalOptimizedCalendarOperations.findAvailableSlotsForClient(
-          request.clientId,
-          startDateTime,
-          endDateTime,
-          request.durationMinutes || 60,
-          request.maxSuggestions || 3,  // Default to 3 suggestions
-          profile?.office_hours as Record<string, { start: string; end: string; enabled: boolean }> || null,
-          agentTimezone
-        );
+      // Use unified CalendarService to find slots (supports both Microsoft and Google)
+      const result = await CalendarService.findAvailableSlots(
+        request.clientId,
+        startDateTime,
+        endDateTime,
+        {
+          durationMinutes: request.durationMinutes || 60,
+          maxSuggestions: request.maxSuggestions || 3,
+          officeHours: profile?.office_hours as Record<string, { start: string; end: string; enabled: boolean }> || null,
+          agentTimezone,
+        },
+        request.agentId // Pass agentId to use agent's assigned calendar
+      );
 
       if (!result.success) {
         return {
@@ -372,7 +401,7 @@ export class BookingOperations {
       }
 
       // Enhance slots with agent info
-      const calendarConnection = agent.calendar_assignment
+      const agentCalendarConnection = agent.calendar_assignment
         ?.calendar_connections as unknown as { email?: string };
       const enhancedSlots: BookingSlot[] = result.availableSlots
         ? result.availableSlots.map((slot) => ({
@@ -382,7 +411,7 @@ export class BookingOperations {
             endFormatted: slot.endFormatted,
             isWithinOfficeHours: true, // Already filtered by office hours
             agentName: agent.name,
-            agentEmail: calendarConnection?.email || "",
+            agentEmail: agentCalendarConnection?.email || "",
           }))
         : [];
 
@@ -459,13 +488,37 @@ export class BookingOperations {
         };
       }
 
-      // Delete the event using calendar operations
-      const result =
-        await FinalOptimizedCalendarOperations.deleteCalendarEventForClient(
-          request.clientId,
-          request.eventId,
-          request.calendarId
-        );
+      // Validate that agent has Microsoft calendar
+      const agent = await getAgentWithCalendarByUUID(
+        request.agentId,
+        request.clientId
+      );
+
+      if (!agent) {
+        return {
+          success: false,
+          error: `Agent not found: ${request.agentId}`,
+        };
+      }
+
+      const calendarConnection = agent.calendar_assignment?.calendar_connections as unknown as {
+        provider_name?: string;
+      };
+      
+      if (calendarConnection?.provider_name !== 'microsoft') {
+        return {
+          success: false,
+          error: `Agent "${agent.name}" has a ${calendarConnection?.provider_name || 'unknown'} calendar assigned, but Microsoft calendar is required. Please assign a Microsoft calendar to this agent.`,
+        };
+      }
+
+      // Delete the event using unified CalendarService (supports both Microsoft and Google)
+      const result = await CalendarService.deleteEvent(
+        request.clientId,
+        request.eventId,
+        request.calendarId,
+        request.agentId // Pass agentId to use agent's assigned calendar
+      );
 
       if (!result.success) {
         return {
@@ -562,19 +615,23 @@ export class BookingOperations {
         }
       }
 
-      // Update the event using calendar operations
-      const updates = {
-        startDateTime: request.newStartDateTime,
-        endDateTime: request.newEndDateTime,
-        calendarId: request.calendarId,
-      };
+      // Get client timezone
+      const clientData = await import('../cache/advancedCacheService').then(m => 
+        m.AdvancedCacheService.getClientCalendarData(request.clientId)
+      );
+      const timeZone = clientData?.timezone || 'Australia/Melbourne';
 
-      const result =
-        await FinalOptimizedCalendarOperations.updateCalendarEventForClient(
-          request.clientId,
-          request.eventId,
-          updates
-        );
+      // Update the event using unified CalendarService (supports both Microsoft and Google)
+      const result = await CalendarService.updateEvent(
+        request.clientId,
+        request.eventId,
+        {
+          startDateTime: request.newStartDateTime,
+          endDateTime: request.newEndDateTime,
+          timeZone,
+        },
+        request.agentId // Pass agentId to use agent's assigned calendar
+      );
 
       if (!result.success) {
         return {
@@ -585,9 +642,29 @@ export class BookingOperations {
 
       console.log(`Appointment rescheduled successfully`);
 
+      // Map CalendarEvent to BookingOperationResponse format
+      const bookingEvent = result.event ? {
+        id: result.event.id,
+        subject: result.event.subject,
+        start: result.event.start,
+        end: result.event.end,
+        location: result.event.location ? {
+          displayName: result.event.location,
+        } : undefined,
+        attendees: result.event.attendees?.map(a => ({
+          emailAddress: {
+            name: a.name,
+            address: a.email,
+          },
+        })),
+        onlineMeeting: result.event.onlineMeetingUrl ? {
+          joinUrl: result.event.onlineMeetingUrl,
+        } : undefined,
+      } : undefined;
+
       return {
         success: true,
-        event: result.event,
+        event: bookingEvent,
         eventId: request.eventId,
         agent: agent as unknown as AgentWithCalendar,
       };

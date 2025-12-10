@@ -313,9 +313,10 @@ export class AdvancedCacheService {
 
   /**
    * Get cached calendar connection or fetch from database
+   * For agent-specific operations, use getCalendarConnectionByAgentId instead
    */
-  static async getCalendarConnection(clientId: number): Promise<GraphCalendarConnection | null> {
-    const cacheKey = `connection:${clientId}`
+  static async getCalendarConnection(clientId: number, preferredProvider?: 'microsoft' | 'google'): Promise<GraphCalendarConnection | null> {
+    const cacheKey = `connection:${clientId}${preferredProvider ? `:${preferredProvider}` : ''}`
     
     let connection = await advancedCache.get<GraphCalendarConnection>(cacheKey)
     if (connection) {
@@ -327,7 +328,37 @@ export class AdvancedCacheService {
     
     // Import here to avoid circular dependencies
     const { getCalendarConnectionByClientId } = await import('../calendar_functions/graphDatabase')
-    connection = await getCalendarConnectionByClientId(clientId)
+    connection = await getCalendarConnectionByClientId(clientId, preferredProvider)
+    
+    if (connection) {
+      await advancedCache.set(cacheKey, connection, this.TTL.CALENDAR_CONNECTION)
+    }
+    
+    return connection
+  }
+
+  /**
+   * Get calendar connection for a specific agent
+   * Uses agent_calendar_assignments to get the correct calendar
+   */
+  static async getCalendarConnectionByAgentId(
+    agentId: string,
+    clientId: number,
+    requiredProvider?: 'microsoft' | 'google'
+  ): Promise<GraphCalendarConnection | null> {
+    const cacheKey = `connection:agent:${agentId}:${clientId}${requiredProvider ? `:${requiredProvider}` : ''}`
+    
+    let connection = await advancedCache.get<GraphCalendarConnection>(cacheKey)
+    if (connection) {
+      console.log(`🚀 Cache HIT: Calendar connection for agent ${agentId}`)
+      return connection
+    }
+
+    console.log(`💾 Cache MISS: Fetching calendar connection for agent ${agentId}`)
+    
+    // Import here to avoid circular dependencies
+    const { getCalendarConnectionByAgentId } = await import('../calendar_functions/graphDatabase')
+    connection = await getCalendarConnectionByAgentId(agentId, clientId, requiredProvider)
     
     if (connection) {
       await advancedCache.set(cacheKey, connection, this.TTL.CALENDAR_CONNECTION)
@@ -362,9 +393,10 @@ export class AdvancedCacheService {
 
   /**
    * Get comprehensive client calendar data in a single cached operation
+   * For agent-specific operations, use getClientCalendarDataByAgentId instead
    */
-  static async getClientCalendarData(clientId: number): Promise<ClientCalendarData | null> {
-    const cacheKey = `client-data:${clientId}`
+  static async getClientCalendarData(clientId: number, preferredProvider?: 'microsoft' | 'google'): Promise<ClientCalendarData | null> {
+    const cacheKey = `client-data:${clientId}${preferredProvider ? `:${preferredProvider}` : ''}`
     
     let clientData = await advancedCache.get<ClientCalendarData>(cacheKey)
     if (clientData) {
@@ -377,7 +409,7 @@ export class AdvancedCacheService {
     try {
       // Fetch all data in parallel
       const [connection, timezone] = await Promise.all([
-        this.getCalendarConnection(clientId),
+        this.getCalendarConnection(clientId, preferredProvider),
         this.getClientTimezone(clientId)
       ])
 
@@ -431,6 +463,74 @@ export class AdvancedCacheService {
       
     } catch (error) {
       console.error(`❌ Error fetching client calendar data for ${clientId}:`, error)
+      return null
+    }
+  }
+
+  /**
+   * Get comprehensive client calendar data for a specific agent
+   * Uses agent_calendar_assignments to get the correct calendar connection
+   */
+  static async getClientCalendarDataByAgentId(
+    agentId: string,
+    clientId: number,
+    requiredProvider?: 'microsoft' | 'google'
+  ): Promise<ClientCalendarData | null> {
+    const cacheKey = `client-data:agent:${agentId}:${clientId}${requiredProvider ? `:${requiredProvider}` : ''}`
+    
+    let clientData = await advancedCache.get<ClientCalendarData>(cacheKey)
+    if (clientData) {
+      console.log(`🚀 Cache HIT: Complete client data for agent ${agentId}`)
+      return clientData
+    }
+
+    console.log(`💾 Cache MISS: Fetching complete client data for agent ${agentId}`)
+    
+    try {
+      // Fetch all data in parallel
+      const [connection, timezone] = await Promise.all([
+        this.getCalendarConnectionByAgentId(agentId, clientId, requiredProvider),
+        this.getClientTimezone(clientId)
+      ])
+
+      if (!connection || !timezone) {
+        return null
+      }
+
+      // Get agent data
+      let agentOfficeHours: OfficeHours | undefined
+      let agentTimezone: string | undefined
+      let agentName: string | undefined
+
+      try {
+        const { getAgentWithCalendarByUUID } = await import('../utils')
+        const agent = await getAgentWithCalendarByUUID(agentId, clientId)
+        
+        if (agent) {
+          agentName = agent.name
+          const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
+          if (profile) {
+            agentOfficeHours = profile.office_hours as OfficeHours
+            agentTimezone = profile.timezone
+          }
+        }
+      } catch (error) {
+        console.log(`Could not fetch agent data for agent ${agentId}:`, error)
+      }
+
+      clientData = {
+        connection,
+        timezone,
+        agentOfficeHours,
+        agentTimezone,
+        agentName
+      }
+
+      await advancedCache.set(cacheKey, clientData, this.TTL.CLIENT_CALENDAR_DATA)
+      return clientData
+      
+    } catch (error) {
+      console.error(`❌ Error fetching client calendar data for agent ${agentId}:`, error)
       return null
     }
   }
