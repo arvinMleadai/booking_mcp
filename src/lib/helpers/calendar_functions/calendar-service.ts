@@ -160,7 +160,10 @@ export class CalendarService {
         connection,
         request.startDateTime,
         request.endDateTime,
-        timeZone
+        timeZone,
+        undefined, // officeHours - will be passed from CalendarService.findAvailableSlots
+        undefined, // agentTimezone - will be passed from CalendarService.findAvailableSlots
+        clientId // Pass clientId so it can use CalendarService
       )
 
       // Block booking if there's ANY conflict
@@ -176,7 +179,8 @@ export class CalendarService {
               (new Date(request.endDateTime).getTime() - new Date(request.startDateTime).getTime()) / (1000 * 60)
             ) || 30,
             maxSuggestions: 3,
-          }
+          },
+          clientId // Pass clientId so it can use CalendarService
         )
 
         return {
@@ -540,7 +544,8 @@ export class CalendarService {
           agentTimezone: options.agentTimezone || timeZone,
           // Use a reasonable search window (4 hours default, or full day if office hours violation)
           searchWindowHours: 4,
-        }
+        },
+        clientId // Pass clientId so it can use CalendarService
       )
 
       return {

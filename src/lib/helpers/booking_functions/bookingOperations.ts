@@ -13,6 +13,7 @@ import {
   getContactWithFuzzySearch,
   isWithinOfficeHours,
 } from "../utils";
+import { DateTime } from "luxon";
 import type {
   BookCustomerAppointmentRequest,
   BookingOperationResponse,
@@ -354,24 +355,31 @@ export class BookingOperations {
         : agent.profiles;
       const agentTimezone = profile?.timezone || "Australia/Melbourne";
 
-      // Simple date parsing (extend with chrono-node if needed)
-      const today = new Date();
+      // Parse dates in the agent's timezone (not UTC)
+      // This ensures 9 AM means 9 AM in the agent's timezone, not UTC
+      let targetDate: DateTime;
+      
       if (request.preferredDate.toLowerCase() === "today") {
-        startDateTime = new Date(today.setHours(9, 0, 0, 0)).toISOString();
-        endDateTime = new Date(today.setHours(17, 0, 0, 0)).toISOString();
+        targetDate = DateTime.now().setZone(agentTimezone);
       } else if (request.preferredDate.toLowerCase() === "tomorrow") {
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        startDateTime = new Date(tomorrow.setHours(9, 0, 0, 0)).toISOString();
-        endDateTime = new Date(tomorrow.setHours(17, 0, 0, 0)).toISOString();
+        targetDate = DateTime.now().setZone(agentTimezone).plus({ days: 1 });
       } else {
-        // Parse as date string (YYYY-MM-DD or ISO format)
-        const targetDate = new Date(request.preferredDate);
+        // Parse as date string (YYYY-MM-DD) in agent's timezone
+        targetDate = DateTime.fromISO(request.preferredDate, { zone: agentTimezone });
         
-        // Set to business day hours (9 AM - 6 PM)
-        startDateTime = new Date(targetDate.setHours(9, 0, 0, 0)).toISOString();
-        endDateTime = new Date(targetDate.setHours(18, 0, 0, 0)).toISOString();
+        // If parsing failed, try as a date-only string
+        if (!targetDate.isValid) {
+          targetDate = DateTime.fromFormat(request.preferredDate, 'yyyy-MM-dd', { zone: agentTimezone });
+        }
       }
+      
+      // Set to business day hours (9 AM - 6 PM) in agent's timezone
+      const startDT = targetDate.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+      const endDT = targetDate.set({ hour: 18, minute: 0, second: 0, millisecond: 0 });
+      
+      // Convert to ISO string (will include timezone offset)
+      startDateTime = startDT.toISO()!;
+      endDateTime = endDT.toISO()!;
 
       console.log(`Searching time window: ${startDateTime} to ${endDateTime} (${agentTimezone})`);
 

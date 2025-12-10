@@ -1,9 +1,9 @@
 // Optimized conflict detection with smart algorithms and caching
 import type { GraphCalendarConnection } from '@/types'
 import { AdvancedCacheService } from '../cache/advancedCacheService'
-import { EnhancedGraphApiService } from './enhancedGraphApiService'
 import { isWithinOfficeHours } from '../utils'
 import { DateTime } from 'luxon'
+import { CalendarService } from './calendar-service'
 
 interface TimeSlot {
   start: Date
@@ -48,7 +48,8 @@ export class OptimizedConflictDetection {
     endDateTime: string,
     timeZone: string,
     officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
-    agentTimezone?: string
+    agentTimezone?: string,
+    clientId?: number
   ): Promise<ConflictResult> {
     try {
       console.log(`🔍 OPTIMIZED: Checking conflicts for ${startDateTime} to ${endDateTime}`)
@@ -80,6 +81,9 @@ export class OptimizedConflictDetection {
       // const cacheKey = `${connection.id}-${dateKey}` // Reserved for future use
       
       // Get busy periods with caching
+      // Note: We need clientId to use CalendarService, but we only have connection
+      // For now, we'll fetch events directly using the provider pattern
+      // This requires getting the connection's clientId or using a different approach
       const busyPeriods: BusyPeriod[] = await AdvancedCacheService.getBusyPeriods(
         connection.id,
         dateKey,
@@ -94,24 +98,33 @@ export class OptimizedConflictDetection {
           
           console.log(`📅 Fetching events for entire day: ${dayStart.toISOString()} to ${dayEnd.toISOString()}`)
           
-          const events = await EnhancedGraphApiService.getEventsOptimized(
-            connection,
+          // Use CalendarService to support both Microsoft and Google
+          // Get clientId from parameter or connection
+          const connectionClientId = clientId || (connection as any).client_id || (connection as any).clientId
+          
+          if (!connectionClientId) {
+            console.error(`❌ Cannot fetch events: No clientId found in connection or parameters`)
+            return []
+          }
+          
+          const eventsResult = await CalendarService.getEvents(
+            connectionClientId,
             {
               startDateTime: dayStart.toISOString(),
               endDateTime: dayEnd.toISOString(),
               timeZone,
-              fieldSet: 'MINIMAL'
-            }
+            },
+            undefined // agentId - will use connection from clientId
           )
           
-          if (!events.success || !events.events) {
-            console.log(`⚠️ No events found or error fetching events`)
+          if (!eventsResult.success || !eventsResult.events) {
+            console.log(`⚠️ No events found or error fetching events: ${eventsResult.error}`)
             return []
           }
           
-          console.log(`📊 Found ${events.events.length} events for conflict checking`)
+          console.log(`📊 Found ${eventsResult.events.length} events for conflict checking`)
           
-          return events.events.map(event => ({
+          return eventsResult.events.map(event => ({
             id: event.id,
             start: new Date(event.start.dateTime),
             end: new Date(event.end.dateTime),
@@ -174,7 +187,8 @@ export class OptimizedConflictDetection {
       officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null
       agentTimezone?: string
       searchWindowHours?: number
-    } = {}
+    } = {},
+    clientId?: number
   ): Promise<{
     hasConflict: boolean
     availableSlots: AvailableSlot[]
@@ -237,17 +251,30 @@ export class OptimizedConflictDetection {
         console.log(`🔍 Searching ${searchWindowHours}h window for alternatives`)
       }
       
-      const busyPeriods = await EnhancedGraphApiService.getEventsOptimized(
-        connection,
+      // Use CalendarService to support both Microsoft and Google
+      const connectionClientId = clientId || (connection as any).client_id || (connection as any).clientId
+      
+      if (!connectionClientId) {
+        console.error(`❌ Cannot fetch events: No clientId found in connection or parameters`)
+        return {
+          hasConflict: true,
+          availableSlots: [],
+          conflictDetails: 'Cannot fetch calendar events: Missing clientId'
+        }
+      }
+      
+      const eventsResult = await CalendarService.getEvents(
+        connectionClientId,
         {
           startDateTime: searchStart.toISOString(),
           endDateTime: searchEnd.toISOString(),
           timeZone,
-          fieldSet: 'MINIMAL'
-        }
+        },
+        undefined // agentId - will use connection from clientId
       )
 
-      if (!busyPeriods.success || !busyPeriods.events) {
+      if (!eventsResult.success || !eventsResult.events) {
+        console.log(`⚠️ No events found or error fetching events: ${eventsResult.error}`)
         return {
           hasConflict: false,
           availableSlots: []
@@ -255,7 +282,7 @@ export class OptimizedConflictDetection {
       }
 
       // Convert to sorted busy periods
-      const sortedBusyPeriods = busyPeriods.events
+      const sortedBusyPeriods = eventsResult.events
         .map(event => ({
           id: event.id,
           start: new Date(event.start.dateTime),
