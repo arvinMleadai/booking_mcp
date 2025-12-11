@@ -326,7 +326,7 @@ export class BookingOperations {
               const { sendSMS } = await import('lead-ai-npm-modules');
               const formattedDate = new Date(request.startDateTime).toLocaleString();
               const linkType = result.event.onlineMeetingUrl ? 'Join meeting' : 'View details';
-              const message = `Your appointment has been booked!\n\nDate: ${formattedDate}\n\n${linkType}: ${bookingLink}`;
+              const message = `Your appointment has been booked!\n\nDate: ${formattedDate}\n\n${linkType}: ${bookingLink} \n\n\nPowered by: LeadAI`;
               await sendSMS(customerPhoneNumber, message, telnyxApiKey);
               console.log(`SMS sent successfully to ${customerPhoneNumber} with ${result.event.onlineMeetingUrl ? 'meeting link' : 'calendar link'}`);
             } else {
