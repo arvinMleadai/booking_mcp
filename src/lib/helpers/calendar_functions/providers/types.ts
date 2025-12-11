@@ -64,7 +64,7 @@ export interface CreateEventRequest {
   timeZone: string
   description?: string
   location?: string
-  attendeeEmail: string
+  attendeeEmail?: string // Optional - can book with just phone number
   attendeeName?: string
   isOnlineMeeting?: boolean
 }

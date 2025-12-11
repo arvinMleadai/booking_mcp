@@ -242,7 +242,8 @@ export class GoogleCalendarProvider implements CalendarProvider {
           } : undefined,
           isAllDay: !event.start?.dateTime,
           isCancelled: event.status === 'cancelled',
-          onlineMeetingUrl: event.hangoutLink || undefined,
+          // Prioritize conferenceData entryPoints (new Google Meet links) over hangoutLink (deprecated)
+          onlineMeetingUrl: (event as any).conferenceData?.entryPoints?.[0]?.uri || event.hangoutLink || undefined,
           webLink: event.htmlLink || undefined,
           created: event.created || undefined,
           updated: event.updated || undefined,
@@ -301,12 +302,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
             email: connection.email,
             displayName: connection.display_name,
           },
-          {
+          // Only add attendee if email is provided
+          ...(request.attendeeEmail ? [{
             email: request.attendeeEmail,
             displayName: request.attendeeName,
-          },
+          }] : []),
         ],
-        sendUpdates: 'all',
+        // Only send updates if we have an attendee email
+        ...(request.attendeeEmail ? { sendUpdates: 'all' as const } : {}),
       }
 
       if (request.description) {
@@ -332,6 +335,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
         return await calendar.events.insert({
           calendarId: 'primary',
           requestBody: eventData,
+          conferenceDataVersion: 1, // Required to get conferenceData in response
         })
       })
 
@@ -343,6 +347,17 @@ export class GoogleCalendarProvider implements CalendarProvider {
       }
 
       const event = response.data
+      
+      // Debug logging for conference data
+      if (request.isOnlineMeeting) {
+        console.log('Google Calendar event created with conferenceData:', {
+          hasConferenceData: !!event.conferenceData,
+          conferenceData: event.conferenceData,
+          entryPoints: event.conferenceData?.entryPoints,
+          hangoutLink: event.hangoutLink,
+        })
+      }
+      
       return {
         success: true,
         event: this.mapGoogleEventToCalendarEvent(event),
@@ -578,6 +593,12 @@ export class GoogleCalendarProvider implements CalendarProvider {
     organizer?: { email?: string | null; displayName?: string | null } | null
     status?: string | null
     hangoutLink?: string | null
+    conferenceData?: {
+      entryPoints?: Array<{
+        entryPointType?: string | null
+        uri?: string | null
+      }> | null
+    } | null
     htmlLink?: string | null
     created?: string | null
     updated?: string | null
@@ -606,7 +627,8 @@ export class GoogleCalendarProvider implements CalendarProvider {
       } : undefined,
       isAllDay: !event.start?.dateTime,
       isCancelled: event.status === 'cancelled',
-      onlineMeetingUrl: event.hangoutLink || undefined,
+      // Prioritize conferenceData entryPoints (new Google Meet links) over hangoutLink (deprecated)
+      onlineMeetingUrl: event.conferenceData?.entryPoints?.[0]?.uri || event.hangoutLink || undefined,
       webLink: event.htmlLink || undefined,
       created: event.created || undefined,
       updated: event.updated || undefined,

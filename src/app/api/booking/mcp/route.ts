@@ -174,6 +174,12 @@ const handler = createMcpHandler(
           .describe(
             "Customer email: 'john@company.com' (optional if customer exists in database)"
           ),
+        customerPhoneNumber: z
+          .string()
+          .optional()
+          .describe(
+            "Customer phone number: '+1234567890' (optional, will be fetched from customer/contact if not provided)"
+          ),
         subject: z
           .string()
           .describe(
@@ -220,6 +226,7 @@ const handler = createMcpHandler(
             agentId,
             customerName,
             customerEmail,
+            customerPhoneNumber,
             subject,
             startDateTime,
             endDateTime,
@@ -252,6 +259,7 @@ const handler = createMcpHandler(
             agentId,
             customerName,
             customerEmail,
+            customerPhoneNumber,
             subject,
             startDateTime,
             endDateTime,
