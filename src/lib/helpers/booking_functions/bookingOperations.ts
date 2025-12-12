@@ -73,6 +73,7 @@ export class BookingOperations {
       console.log(`Searching for customer/contact: "${request.customerName}"`);
       let customer: Customer | null = null;
       let customerEmail = request.customerEmail;
+      let customerPhoneNumber = request.customerPhoneNumber;
       let customerDisplayName = request.customerName;
       let searchSource: "customer" | "contact" | "manual" = "manual";
 
@@ -94,11 +95,14 @@ export class BookingOperations {
             company: customer.company,
           });
 
-          // Use customer email if available and not overridden
+          // Use customer email and phone if available and not overridden
           if (customer.email && !request.customerEmail) {
             customerEmail = customer.email;
             customerDisplayName = customer.full_name;
             searchSource = "customer";
+          }
+          if (customer.phone && !request.customerPhoneNumber) {
+            customerPhoneNumber = customer.phone;
           }
         }
       } catch (error) {
@@ -121,6 +125,7 @@ export class BookingOperations {
               first_name?: string;
               last_name?: string;
               email?: string;
+              phone_number?: string;
               company?: string;
             };
 
@@ -131,13 +136,16 @@ export class BookingOperations {
               company: contact.company,
             });
 
-            // Use contact email if available
+            // Use contact email and phone if available
             if (contact.email) {
               customerEmail = contact.email;
               customerDisplayName = contact.name || 
                 `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
                 request.customerName;
               searchSource = "contact";
+            }
+            if (contact.phone_number && !request.customerPhoneNumber) {
+              customerPhoneNumber = contact.phone_number;
             }
           } else {
             console.log(`Not found in contacts: "${request.customerName}"`);
@@ -147,15 +155,20 @@ export class BookingOperations {
         }
       }
 
-      // Validate email is available
-      if (!customerEmail) {
+      // Validate that we have either email or phone number for communication
+      if (!customerEmail && !customerPhoneNumber) {
         return {
           success: false,
-          error: `"${request.customerName}" not found in customers or contacts. Please provide customerEmail parameter to book manually.`,
+          error: `"${request.customerName}" not found in customers or contacts. Please provide either customerEmail or customerPhoneNumber to book the appointment.`,
         };
       }
 
-      console.log(`Using email: ${customerEmail} (source: ${searchSource})`);
+      if (customerEmail) {
+        console.log(`Using email: ${customerEmail} (source: ${searchSource})`);
+      }
+      if (customerPhoneNumber) {
+        console.log(`Using phone: ${customerPhoneNumber} (source: ${searchSource})`);
+      }
 
       // Step 4: Validate time is not in the past
       const now = new Date();
@@ -224,6 +237,7 @@ export class BookingOperations {
       const timeZone = clientData?.timezone || 'Australia/Melbourne';
 
       // Use unified CalendarService (supports both Microsoft and Google)
+      // Email is optional - we can book with just phone number and send SMS
       const calendarServiceRequest: CreateEventRequest = {
         subject: eventSubject,
         startDateTime: request.startDateTime,
@@ -231,7 +245,7 @@ export class BookingOperations {
         timeZone,
         description: defaultDescription,
         location: request.location,
-        attendeeEmail: customerEmail,
+        attendeeEmail: customerEmail || '', // Optional - can be empty if we have phone number
         attendeeName: customerDisplayName,
         isOnlineMeeting: request.isOnlineMeeting,
       };
@@ -290,6 +304,46 @@ export class BookingOperations {
           joinUrl: result.event.onlineMeetingUrl,
         } : undefined,
       } : undefined;
+
+      // Send SMS with booking link if phone number is available
+      if (customerPhoneNumber && result.event) {
+        try {
+          // Prioritize meeting link (onlineMeetingUrl) over calendar link (webLink)
+          const bookingLink = result.event.onlineMeetingUrl || result.event.webLink;
+          
+          // Debug logging
+          console.log('Event details for SMS:', {
+            hasOnlineMeetingUrl: !!result.event.onlineMeetingUrl,
+            onlineMeetingUrl: result.event.onlineMeetingUrl,
+            hasWebLink: !!result.event.webLink,
+            webLink: result.event.webLink,
+            bookingLink,
+          });
+          
+          if (bookingLink) {
+            const telnyxApiKey = process.env.TELNYX_API_KEY;
+            if (telnyxApiKey) {
+              const { sendSMS } = await import('lead-ai-npm-modules');
+              const formattedDate = new Date(request.startDateTime).toLocaleString();
+              const linkType = result.event.onlineMeetingUrl ? 'Join meeting' : 'View details';
+              const message = `Your appointment has been booked!\n\nDate: ${formattedDate}\n\n${linkType}: ${bookingLink} \n\n\nPowered by: LeadAI`;
+              await sendSMS(customerPhoneNumber, message, telnyxApiKey);
+              console.log(`SMS sent successfully to ${customerPhoneNumber} with ${result.event.onlineMeetingUrl ? 'meeting link' : 'calendar link'}`);
+            } else {
+              console.warn('TELNYX_API_KEY not found in environment variables. SMS not sent.');
+            }
+          } else {
+            console.warn('No booking link available. SMS not sent.', {
+              eventId: result.event.id,
+              hasOnlineMeetingUrl: !!result.event.onlineMeetingUrl,
+              hasWebLink: !!result.event.webLink,
+            });
+          }
+        } catch (smsError) {
+          // Log error but don't fail the booking
+          console.error('Error sending SMS:', smsError);
+        }
+      }
 
       return {
         success: true,
@@ -719,9 +773,10 @@ export class BookingOperations {
         request.clientId
       );
 
-      // Validate customer/contact
+      // Validate customer/contact - require either email or phone number
       let customer: Customer | null = null;
       let foundEmail = false;
+      let foundPhone = false;
 
       try {
         // Try customers first
@@ -734,29 +789,33 @@ export class BookingOperations {
           customer = customerResults[0].item as unknown as Customer;
           if (customer.email || request.customerEmail) {
             foundEmail = true;
-          } else {
-            errors.push("Customer found but has no email address");
+          }
+          if (customer.phone || request.customerPhoneNumber) {
+            foundPhone = true;
           }
         }
 
         // If not found in customers, try contacts
-        if (!foundEmail && !request.customerEmail) {
+        if ((!foundEmail && !request.customerEmail) || (!foundPhone && !request.customerPhoneNumber)) {
           const contactResults = await getContactWithFuzzySearch(
             request.customerName,
             request.clientId.toString()
           );
 
           if (contactResults && contactResults.length > 0) {
-            const contact = contactResults[0].item as { email?: string };
+            const contact = contactResults[0].item as { email?: string; phone_number?: string };
             if (contact.email) {
               foundEmail = true;
+            }
+            if (contact.phone_number) {
+              foundPhone = true;
             }
           }
         }
 
-        // Check if we have email from any source
-        if (!foundEmail && !request.customerEmail) {
-          errors.push("Customer/contact not found and no email provided");
+        // Check if we have email or phone from any source
+        if (!foundEmail && !request.customerEmail && !foundPhone && !request.customerPhoneNumber) {
+          errors.push("Customer/contact not found and no email or phone number provided");
         }
       } catch (error) {
         console.log(error)

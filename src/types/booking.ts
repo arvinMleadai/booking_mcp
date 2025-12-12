@@ -106,6 +106,7 @@ export interface BookCustomerAppointmentRequest {
   agentId: string // Agent UUID
   customerName: string // Will search in customer database
   customerEmail?: string // Optional, will be fetched from customer if not provided
+  customerPhoneNumber?: string // Optional, will be fetched from customer/contact if not provided
   subject: string
   startDateTime: string // ISO 8601 format
   endDateTime: string // ISO 8601 format

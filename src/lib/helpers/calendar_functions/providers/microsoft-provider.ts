@@ -255,17 +255,18 @@ export class MicrosoftCalendarProvider implements CalendarProvider {
               time: new Date().toISOString(),
             },
           },
-          {
-            type: 'required',
+          // Only add attendee if email is provided
+          ...(request.attendeeEmail ? [{
+            type: 'required' as const,
             emailAddress: {
               name: request.attendeeName,
               address: request.attendeeEmail,
             },
             status: {
-              response: 'none',
+              response: 'none' as const,
               time: new Date().toISOString(),
             },
-          },
+          }] : []),
         ],
         responseRequested: true,
       }

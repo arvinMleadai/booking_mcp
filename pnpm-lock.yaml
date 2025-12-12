@@ -26,6 +26,9 @@ importers:
       googleapis:
         specifier: ^160.0.0
         version: 160.0.0
+      lead-ai-npm-modules:
+        specifier: ^1.0.10
+        version: 1.0.10(@microsoft/microsoft-graph-client@3.0.7)(@supabase/supabase-js@2.57.4)(googleapis@160.0.0)
       luxon:
         specifier: ^3.7.2
         version: 3.7.2
@@ -1612,6 +1615,13 @@ packages:
   language-tags@1.0.9:
     resolution: {integrity: sha512-MbjN408fEndfiQXbFQ1vnd+1NoLDsnQW41410oQBXiyXDMYH5z505juWa4KUE1LqxRC7DgOgZDbKLxHIwm27hA==}
     engines: {node: '>=0.10'}
+
+  lead-ai-npm-modules@1.0.10:
+    resolution: {integrity: sha512-P6yRY9bzZ5wzsJUdihEYoUV3I3YYBUa2H367ERpGZg+6crpZFAWntKtgElKDDto0V8BJUhJ255JQXjfez7p8DQ==}
+    peerDependencies:
+      '@microsoft/microsoft-graph-client': ^3.0.7
+      '@supabase/supabase-js': ^2.74.0
+      googleapis: ^160.0.0
 
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
@@ -4028,6 +4038,12 @@ snapshots:
   language-tags@1.0.9:
     dependencies:
       language-subtag-registry: 0.3.23
+
+  lead-ai-npm-modules@1.0.10(@microsoft/microsoft-graph-client@3.0.7)(@supabase/supabase-js@2.57.4)(googleapis@160.0.0):
+    dependencies:
+      '@microsoft/microsoft-graph-client': 3.0.7
+      '@supabase/supabase-js': 2.57.4
+      googleapis: 160.0.0
 
   levn@0.4.1:
     dependencies:

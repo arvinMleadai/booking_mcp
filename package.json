@@ -16,6 +16,7 @@
     "axios": "^1.11.0",
     "fuse.js": "^7.1.0",
     "googleapis": "^160.0.0",
+    "lead-ai-npm-modules": "^1.0.10",
     "luxon": "^3.7.2",
     "mcp-handler": "^1.0.2",
     "next": "^16.0.8",
