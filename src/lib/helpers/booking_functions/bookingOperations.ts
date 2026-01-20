@@ -95,6 +95,7 @@ export class BookingOperations {
             company: customer.company,
           });
 
+          
           // Use customer email and phone if available and not overridden
           if (customer.email && !request.customerEmail) {
             customerEmail = customer.email;
