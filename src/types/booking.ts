@@ -33,7 +33,12 @@ export interface AgentWithProfile extends Agent {
     name: string
     office_hours: Record<string, { start: string; end: string; enabled: boolean }>
     timezone: string
-  }
+  } | Array<{
+    id: number
+    name: string
+    office_hours: Record<string, { start: string; end: string; enabled: boolean }>
+    timezone: string
+  }>
 }
 
 /**
