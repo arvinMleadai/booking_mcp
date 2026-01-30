@@ -268,6 +268,14 @@ const handler = createMcpHandler(
 
           console.log("book customer appointment (Booking MCP)");
           console.table(args);
+          console.log("🔍 Raw args for debugging:", {
+            boardId: args.boardId,
+            stageId: args.stageId,
+            dealId: args.dealId,
+            boardIdType: typeof args.boardId,
+            stageIdType: typeof args.stageId,
+            dealIdType: typeof args.dealId,
+          });
 
           // Convert and validate clientId
           const numericClientId =
@@ -284,12 +292,46 @@ const handler = createMcpHandler(
             };
           }
 
+          // Convert dealId to number if it's a string
+          const numericDealId = dealId !== undefined 
+            ? (typeof dealId === "number" ? dealId : (typeof dealId === "string" ? parseInt(dealId, 10) : undefined))
+            : undefined;
+
+          // Validate dealId is a valid number if provided
+          if (dealId !== undefined && (isNaN(numericDealId as number) || numericDealId === undefined)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: dealId must be a valid number, received: ${dealId}`,
+                },
+              ],
+            };
+          }
+
+          // Normalize boardId and stageId (handle empty strings, null, etc.)
+          let normalizedBoardId: string | undefined = undefined;
+          if (boardId && typeof boardId === "string") {
+            const trimmed = boardId.trim();
+            if (trimmed !== "") {
+              normalizedBoardId = trimmed;
+            }
+          }
+
+          let normalizedStageId: string | undefined = undefined;
+          if (stageId && typeof stageId === "string") {
+            const trimmed = stageId.trim();
+            if (trimmed !== "") {
+              normalizedStageId = trimmed;
+            }
+          }
+
           const request: BookCustomerAppointmentRequest = {
             clientId: numericClientId,
             agentId,
-            boardId,
-            stageId,
-            dealId: typeof dealId === "number" ? dealId : undefined,
+            boardId: normalizedBoardId,
+            stageId: normalizedStageId,
+            dealId: numericDealId,
             customerName,
             customerEmail,
             customerPhoneNumber,
@@ -475,6 +517,14 @@ const handler = createMcpHandler(
 
           console.log("find available booking slots (Booking MCP)");
           console.table(args);
+          console.log("🔍 Raw args for FindAvailableBookingSlots:", {
+            boardId: args.boardId,
+            stageId: args.stageId,
+            dealId: args.dealId,
+            boardIdType: typeof args.boardId,
+            stageIdType: typeof args.stageId,
+            dealIdType: typeof args.dealId,
+          });
 
           // Convert and validate clientId
           const numericClientId =
@@ -491,12 +541,48 @@ const handler = createMcpHandler(
             };
           }
 
+          // Convert dealId to number if it's a string
+          // Note: Zod transform should convert strings to numbers, but we handle both cases for safety
+          let numericDealIdForSlots: number | undefined = undefined;
+          if (dealId !== undefined && dealId !== null) {
+            if (typeof dealId === "number") {
+              numericDealIdForSlots = dealId;
+            } else {
+              // Handle string case (shouldn't happen after Zod transform, but safe to handle)
+              const dealIdStr = String(dealId);
+              const trimmed = dealIdStr.trim();
+              if (trimmed !== "") {
+                const parsed = parseInt(trimmed, 10);
+                if (!isNaN(parsed)) {
+                  numericDealIdForSlots = parsed;
+                }
+              }
+            }
+          }
+
+          // Normalize boardId and stageId (handle empty strings, null, etc.)
+          let normalizedBoardIdForSlots: string | undefined = undefined;
+          if (boardId && typeof boardId === "string") {
+            const trimmed = boardId.trim();
+            if (trimmed !== "") {
+              normalizedBoardIdForSlots = trimmed;
+            }
+          }
+
+          let normalizedStageIdForSlots: string | undefined = undefined;
+          if (stageId && typeof stageId === "string") {
+            const trimmed = stageId.trim();
+            if (trimmed !== "") {
+              normalizedStageIdForSlots = trimmed;
+            }
+          }
+
           const request: FindBookingSlotsRequest = {
             clientId: numericClientId,
             agentId,
-            boardId,
-            stageId,
-            dealId: typeof dealId === "number" ? dealId : undefined,
+            boardId: normalizedBoardIdForSlots,
+            stageId: normalizedStageIdForSlots,
+            dealId: numericDealIdForSlots,
             preferredDate,
             durationMinutes,
             maxSuggestions,
