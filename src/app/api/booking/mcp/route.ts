@@ -154,7 +154,7 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars. IMPORTANT: If boardId, stageId, or dealId are mentioned in the booking context/prompt, you MUST pass them to this tool. The dealId will automatically fetch customer name, email, and phone from the database.",
+        description: "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars. CRITICAL: Extract and pass boardId, stageId, and dealId if they appear ANYWHERE in the booking instructions, prompt, or context (e.g., '**Board ID:** `xxx`', '**Stage ID:** `xxx`', '**Deal ID:** `xxx`'). The dealId automatically fetches customer name, email, and phone from the database.",
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -170,20 +170,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Uses the pipeline's assigned calendar connection for booking when agent has no calendar."
+              "Pipeline/board UUID - EXTRACT from booking instructions if present (look for 'Board ID:', 'BoardID:', or similar). Example: '5898f07d-2473-4a1f-892a-ea5bc1203576'. Uses the pipeline's assigned calendar connection for booking when agent has no calendar."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used to generate the appointment subject (e.g., 'Discovery Call / Pre-Demo')."
+              "Pipeline stage UUID - EXTRACT from booking instructions if present (look for 'Stage ID:', 'StageID:', or similar). Example: 'c174444a-e0d3-49c2-b76f-6e407ea2af71'. Used to generate the appointment subject (e.g., 'Discovery Call / Pre-Demo')."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id) (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used to: (1) automatically fetch customer name/email/phone from the deal, (2) generate better appointment subject. Example: 6811"
+              "Deal ID (stage_items.id) - EXTRACT from booking instructions if present (look for 'Deal ID:', 'DealID:', or similar). Example: 6819 or '6819'. Automatically fetches customer name/email/phone from the deal database and generates better appointment subjects."
             ),
           customerName: z
             .string()
@@ -451,7 +451,7 @@ const handler = createMcpHandler(
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times. IMPORTANT: If boardId, stageId, or dealId are mentioned in the booking context/prompt, you MUST pass them to this tool. The dealId will automatically fetch customer details for logging.",
+        description: "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times. CRITICAL: Extract and pass boardId, stageId, and dealId if they appear ANYWHERE in the booking instructions, prompt, or context (e.g., '**Board ID:** `xxx`', '**Stage ID:** `xxx`', '**Deal ID:** `xxx`'). These IDs enable pipeline-specific calendar selection and customer lookup.",
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -465,20 +465,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Uses the pipeline's assigned calendar connection when agent has no calendar."
+              "Pipeline/board UUID - EXTRACT from booking instructions if present (look for 'Board ID:', 'BoardID:', or similar). Example: '5898f07d-2473-4a1f-892a-ea5bc1203576'. Uses the pipeline's assigned calendar connection when agent has no calendar."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used for calendar selection and subject generation."
+              "Pipeline stage UUID - EXTRACT from booking instructions if present (look for 'Stage ID:', 'StageID:', or similar). Example: 'c174444a-e0d3-49c2-b76f-6e407ea2af71'. Used for calendar selection and subject generation."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id) (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used to automatically fetch customer details (name, email, phone) from the deal. Example: 6811"
+              "Deal ID (stage_items.id) - EXTRACT from booking instructions if present (look for 'Deal ID:', 'DealID:', or similar). Example: 6819 or '6819'. Automatically fetches customer details (name, email, phone) from the deal database."
             ),
           preferredDate: z
             .string()
