@@ -19,6 +19,7 @@ import {
   getPipelineById,
   getPipelineStageById,
   getStageItemById,
+  getPartyContactInfo,
 } from "./bookingMetadata";
 import type {
   BookCustomerAppointmentRequest,
@@ -97,89 +98,164 @@ export class BookingOperations {
       console.log(`Agent validated: ${agent.name}`);
 
       // Step 3: Search for customer/contact in database
+      // Improved lookup: Use dealId/party_id first, then fall back to fuzzy search
       console.log(`Searching for customer/contact: "${request.customerName}"`);
       let customer: Customer | null = null;
       let customerEmail = request.customerEmail;
       let customerPhoneNumber = request.customerPhoneNumber;
       let customerDisplayName = request.customerName;
-      let searchSource: "customer" | "contact" | "manual" = "manual";
+      let searchSource: "customer" | "contact" | "manual" | "deal" = "manual";
 
-      // First, try searching in customers database
-      try {
-        const customerResults = await getCustomerWithFuzzySearch(
-          request.customerName,
-          request.clientId.toString()
-        );
+      // Priority 1: If dealId is provided, look up customer/contact via party_id
+      if (deal?.party_id) {
+        try {
+          console.log(`Looking up customer/contact from deal party_id: ${deal.party_id}`);
+          const partyInfo = await getPartyContactInfo(deal.party_id, request.clientId);
 
-        if (customerResults && customerResults.length > 0) {
-          const bestMatch = customerResults[0];
-          customer = bestMatch.item as unknown as Customer;
+          if (partyInfo) {
+            console.log(`Found via deal party_id:`, {
+              type: partyInfo.type,
+              name: partyInfo.name,
+              email: partyInfo.email,
+              phone: partyInfo.phone,
+            });
 
-          console.log(`Found in customers:`, {
-            score: bestMatch.score,
-            name: customer.full_name,
-            email: customer.email,
-            company: customer.company,
-          });
+            // Use party info if not explicitly overridden in request
+            if (!request.customerEmail && partyInfo.email) {
+              customerEmail = partyInfo.email;
+            }
+            if (!request.customerPhoneNumber && partyInfo.phone) {
+              customerPhoneNumber = partyInfo.phone;
+            }
+            if (!request.customerName || request.customerName === customerDisplayName) {
+              customerDisplayName = partyInfo.name;
+            }
+            searchSource = partyInfo.type === "customer" ? "customer" : "contact";
 
-          
-          // Use customer email and phone if available and not overridden
-          if (customer.email && !request.customerEmail) {
-            customerEmail = customer.email;
-            customerDisplayName = customer.full_name;
-            searchSource = "customer";
+            // Mark as found via deal lookup
+            if (partyInfo.type === "customer") {
+              customer = {
+                id: partyInfo.id,
+                client_id: request.clientId,
+                full_name: partyInfo.name,
+                email: partyInfo.email,
+                phone: partyInfo.phone,
+                company: partyInfo.company,
+                created_at: "",
+                updated_at: "",
+              } as Customer;
+            }
+          } else {
+            console.log(`No customer/contact found for party_id: ${deal.party_id}`);
           }
-          if (customer.phone && !request.customerPhoneNumber) {
-            customerPhoneNumber = customer.phone;
-          }
+        } catch (error) {
+          console.error("Error looking up party contact info:", error);
         }
-      } catch (error) {
-        console.error("Error searching customers:", error);
       }
 
-      // If not found in customers, try searching in contacts
-      if (!customerEmail && !request.customerEmail) {
+      // Priority 2: If we still don't have email/phone, try fuzzy search
+      // Only search if we're missing at least one contact method
+      const hasEmail = customerEmail || request.customerEmail;
+      const hasPhone = customerPhoneNumber || request.customerPhoneNumber;
+      // We need fuzzy search if we don't have both email and phone
+      // (We need at least one, but it's better to have both)
+      const needsFuzzySearch = !hasEmail || !hasPhone;
+
+      if (needsFuzzySearch) {
+        // First, try searching in customers database
         try {
-          const contactResults = await getContactWithFuzzySearch(
+          const customerResults = await getCustomerWithFuzzySearch(
             request.customerName,
             request.clientId.toString()
           );
 
-          if (contactResults && contactResults.length > 0) {
-            const bestMatch = contactResults[0];
-            const contact = bestMatch.item as {
+          if (customerResults && customerResults.length > 0) {
+            const bestMatch = customerResults[0];
+            const customerData = bestMatch.item as {
               id: number;
-              name?: string;
-              first_name?: string;
-              last_name?: string;
+              full_name: string;
               email?: string;
               phone_number?: string;
               company?: string;
             };
+            
+            customer = {
+              id: customerData.id,
+              client_id: request.clientId,
+              full_name: customerData.full_name,
+              email: customerData.email,
+              phone: customerData.phone_number,
+              company: customerData.company,
+              created_at: "",
+              updated_at: "",
+            } as Customer;
 
-            console.log(`Found in contacts:`, {
+            console.log(`Found in customers (fuzzy):`, {
               score: bestMatch.score,
-              name: contact.name,
-              email: contact.email,
-              company: contact.company,
+              name: customer.full_name,
+              email: customer.email,
+              company: customer.company,
             });
 
-            // Use contact email and phone if available
-            if (contact.email) {
-              customerEmail = contact.email;
-              customerDisplayName = contact.name || 
-                `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
-                request.customerName;
-              searchSource = "contact";
+            // Use customer email and phone if available and not overridden
+            if (customer.email && !customerEmail && !request.customerEmail) {
+              customerEmail = customer.email;
+              customerDisplayName = customer.full_name;
+              searchSource = "customer";
             }
-            if (contact.phone_number && !request.customerPhoneNumber) {
-              customerPhoneNumber = contact.phone_number;
+            if (customer.phone && !customerPhoneNumber && !request.customerPhoneNumber) {
+              customerPhoneNumber = customer.phone;
             }
-          } else {
-            console.log(`Not found in contacts: "${request.customerName}"`);
           }
         } catch (error) {
-          console.error("Error searching contacts:", error);
+          console.error("Error searching customers:", error);
+        }
+
+        // If not found in customers, try searching in contacts
+        if (!customerEmail && !request.customerEmail) {
+          try {
+            const contactResults = await getContactWithFuzzySearch(
+              request.customerName,
+              request.clientId.toString()
+            );
+
+            if (contactResults && contactResults.length > 0) {
+              const bestMatch = contactResults[0];
+              const contact = bestMatch.item as {
+                id: number;
+                name?: string;
+                first_name?: string;
+                last_name?: string;
+                email?: string;
+                phone_number?: string;
+                company?: string;
+              };
+
+              console.log(`Found in contacts (fuzzy):`, {
+                score: bestMatch.score,
+                name: contact.name,
+                email: contact.email,
+                company: contact.company,
+              });
+
+              // Use contact email and phone if available
+              if (contact.email) {
+                customerEmail = contact.email;
+                customerDisplayName =
+                  contact.name ||
+                  `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
+                  request.customerName;
+                searchSource = "contact";
+              }
+              if (contact.phone_number && !customerPhoneNumber && !request.customerPhoneNumber) {
+                customerPhoneNumber = contact.phone_number;
+              }
+            } else {
+              console.log(`Not found in contacts: "${request.customerName}"`);
+            }
+          } catch (error) {
+            console.error("Error searching contacts:", error);
+          }
         }
       }
 
@@ -844,7 +920,23 @@ export class BookingOperations {
         );
 
         if (customerResults && customerResults.length > 0) {
-          customer = customerResults[0].item as unknown as Customer;
+          const customerData = customerResults[0].item as {
+            id: number;
+            full_name: string;
+            email?: string;
+            phone_number?: string;
+            company?: string;
+          };
+          customer = {
+            id: customerData.id,
+            client_id: request.clientId,
+            full_name: customerData.full_name,
+            email: customerData.email,
+            phone: customerData.phone_number,
+            company: customerData.company,
+            created_at: "",
+            updated_at: "",
+          } as Customer;
           if (customer.email || request.customerEmail) {
             foundEmail = true;
           }
