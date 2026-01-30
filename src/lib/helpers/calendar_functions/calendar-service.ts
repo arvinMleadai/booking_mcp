@@ -30,14 +30,23 @@ export class CalendarService {
     calendarConnectionId?: string
   ): Promise<GraphCalendarConnection | null> {
     // Priority 1: Explicit calendar override (board/pipeline calendar)
+    // If specified, ONLY use this - don't fall back to agent's calendar
     if (calendarConnectionId) {
-      console.log(`📅 Using explicit calendar connection: ${calendarConnectionId}`)
-      return await getCalendarConnectionById(calendarConnectionId, clientId)
+      console.log(`📅 Using explicit board calendar connection: ${calendarConnectionId}`)
+      const boardCalendar = await getCalendarConnectionById(calendarConnectionId, clientId)
+      
+      if (!boardCalendar) {
+        console.error(`❌ Board calendar ${calendarConnectionId} not found`)
+        return null
+      }
+      
+      console.log(`✅ Board calendar found: ${boardCalendar.email}`)
+      return boardCalendar
     }
     
-    // Priority 2: Agent's assigned calendar
+    // Priority 2: Agent's assigned calendar (only if no board calendar specified)
     if (agentId) {
-      console.log(`📅 Checking agent calendar for: ${agentId}`)
+      console.log(`📅 No board calendar specified, checking agent calendar for: ${agentId}`)
       const agentCalendar = await getCalendarConnectionByAgentId(agentId, clientId)
       if (agentCalendar) {
         console.log(`✅ Using agent's calendar: ${agentCalendar.email}`)
@@ -46,10 +55,10 @@ export class CalendarService {
       console.warn(`⚠️ Agent ${agentId} has no calendar assigned`)
     }
     
-    // Priority 3: Client-level fallback (only if no agent specified)
+    // Priority 3: Client-level fallback (only if no agent or board specified)
     // This is the "receptionist" or default calendar
-    if (!agentId) {
-      console.log(`📅 Using client-level calendar (no agent specified)`)
+    if (!agentId && !calendarConnectionId) {
+      console.log(`📅 Using client-level calendar (no agent or board specified)`)
       return await getCalendarConnectionByClientId(clientId)
     }
     

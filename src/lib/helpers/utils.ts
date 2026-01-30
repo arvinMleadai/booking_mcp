@@ -490,8 +490,10 @@ export const validateAgentHasCalendar = async (
     };
   }
 
-  // First choice: explicit calendar connection override (e.g., pipeline/board calendar)
+  // Priority 1: Explicit calendar connection override (board/pipeline calendar)
+  // If calendarConnectionId is provided, ONLY use that - don't fall back to agent's calendar
   if (calendarConnectionId) {
+    console.log(`🎯 Board calendar specified (${calendarConnectionId}), checking connection...`);
     const { getCalendarConnectionById } = await import(
       "./calendar_functions/graphDatabase"
     );
@@ -500,15 +502,29 @@ export const validateAgentHasCalendar = async (
       clientId
     );
 
-    if (connection?.is_connected) {
+    if (!connection) {
       return {
-        isValid: true,
-        calendarProvider: connection.provider_name as "microsoft" | "google",
+        isValid: false,
+        error: `Board calendar ${calendarConnectionId} not found for client ${clientId}`,
       };
     }
+
+    if (!connection.is_connected) {
+      return {
+        isValid: false,
+        error: `Board calendar is disconnected. Please reconnect the calendar (${connection.email || calendarConnectionId})`,
+      };
+    }
+
+    console.log(`✅ Using board calendar: ${connection.email}`);
+    return {
+      isValid: true,
+      calendarProvider: connection.provider_name as "microsoft" | "google",
+    };
   }
 
-  // Fallback: agent-specific calendar assignment (if connected)
+  // Priority 2: Agent-specific calendar assignment (only if no board calendar specified)
+  console.log(`📋 No board calendar specified, checking agent's assigned calendar...`);
   const agentCalendarConnection = agent.calendar_assignment
     ?.calendar_connections as unknown as
     | {
@@ -519,6 +535,7 @@ export const validateAgentHasCalendar = async (
     | undefined;
 
   if (agentCalendarConnection?.is_connected) {
+    console.log(`✅ Using agent's assigned calendar`);
     return {
       isValid: true,
       calendarProvider: agentCalendarConnection.provider_name as
