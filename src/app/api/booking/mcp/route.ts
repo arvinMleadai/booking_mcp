@@ -154,7 +154,7 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.",
+        description: "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars. IMPORTANT: If boardId, stageId, or dealId are mentioned in the booking context/prompt, you MUST pass them to this tool. The dealId will automatically fetch customer name, email, and phone from the database.",
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -170,20 +170,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID (optional). If provided, uses the pipeline's assigned calendar connection for booking."
+              "Pipeline/board UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Uses the pipeline's assigned calendar connection for booking when agent has no calendar."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID (optional). Used to build a better appointment subject."
+              "Pipeline stage UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used to generate the appointment subject (e.g., 'Discovery Call / Pre-Demo')."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id) (optional). Used to build a better appointment subject."
+              "Deal ID (stage_items.id) (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used to: (1) automatically fetch customer name/email/phone from the deal, (2) generate better appointment subject. Example: 6811"
             ),
           customerName: z
             .string()
@@ -451,7 +451,7 @@ const handler = createMcpHandler(
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times.",
+        description: "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times. IMPORTANT: If boardId, stageId, or dealId are mentioned in the booking context/prompt, you MUST pass them to this tool. The dealId will automatically fetch customer details for logging.",
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -465,17 +465,21 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID (optional). If provided, uses the pipeline's assigned calendar connection."
+              "Pipeline/board UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Uses the pipeline's assigned calendar connection when agent has no calendar."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
-            .describe("Pipeline stage UUID (optional)."),
+            .describe(
+              "Pipeline stage UUID (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used for calendar selection and subject generation."
+            ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
-            .describe("Deal ID (stage_items.id) (optional)."),
+            .describe(
+              "Deal ID (stage_items.id) (optional but recommended). If provided in the booking context/prompt, MUST be passed here. Used to automatically fetch customer details (name, email, phone) from the deal. Example: 6811"
+            ),
           preferredDate: z
             .string()
             .describe(
