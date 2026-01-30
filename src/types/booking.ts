@@ -109,16 +109,19 @@ export interface Contact {
 export interface BookCustomerAppointmentRequest {
   clientId: number
   agentId: string // Agent UUID
+  boardId?: string // Pipelines (board) UUID - used to select pipeline calendar if provided
+  stageId?: string // Pipeline stage UUID - used for subject/metadata
+  dealId?: number // stage_items.id - used for subject/metadata
   customerName: string // Will search in customer database
   customerEmail?: string // Optional, will be fetched from customer if not provided
   customerPhoneNumber?: string // Optional, will be fetched from customer/contact if not provided
-  subject: string
+  subject?: string
   startDateTime: string // ISO 8601 format
   endDateTime: string // ISO 8601 format
   description?: string
   location?: string
   isOnlineMeeting?: boolean
-  calendarId?: string // Optional, uses agent's assigned calendar if not specified
+  calendarId?: string // Optional calendar connection ID (lead_dialer.calendar_connections.id). Overrides agent/pipeline selection.
 }
 
 /**
@@ -127,9 +130,13 @@ export interface BookCustomerAppointmentRequest {
 export interface FindBookingSlotsRequest {
   clientId: number
   agentId: string
+  boardId?: string // Pipelines (board) UUID - used to select pipeline calendar if provided
+  stageId?: string
+  dealId?: number
   preferredDate: string // Natural language: "today", "tomorrow", "next monday"
   durationMinutes?: number // Default: 60
   maxSuggestions?: number // Default: 5
+  calendarId?: string // Optional calendar connection ID override
 }
 
 /**

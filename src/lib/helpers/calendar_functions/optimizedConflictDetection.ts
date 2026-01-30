@@ -49,7 +49,8 @@ export class OptimizedConflictDetection {
     timeZone: string,
     officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
     agentTimezone?: string,
-    clientId?: number
+    clientId?: number,
+    calendarConnectionId?: string
   ): Promise<ConflictResult> {
     try {
       console.log(`🔍 OPTIMIZED: Checking conflicts for ${startDateTime} to ${endDateTime}`)
@@ -114,7 +115,8 @@ export class OptimizedConflictDetection {
               endDateTime: dayEnd.toISOString(),
               timeZone,
             },
-            undefined // agentId - will use connection from clientId
+            undefined,
+            calendarConnectionId || connection.id
           )
           
           if (!eventsResult.success || !eventsResult.events) {
@@ -188,7 +190,9 @@ export class OptimizedConflictDetection {
       agentTimezone?: string
       searchWindowHours?: number
     } = {},
-    clientId?: number
+    clientId?: number,
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<{
     hasConflict: boolean
     availableSlots: AvailableSlot[]
@@ -220,16 +224,9 @@ export class OptimizedConflictDetection {
         agentTimezone
       )
       
-      if (!conflictCheck.hasConflict) {
-        return {
-          hasConflict: false,
-          availableSlots: []
-        }
-      }
-
-      // Determine search window for finding alternatives
+      // Determine search window for finding slots
       // If office hours are configured and violated, search the entire day within office hours
-      // Otherwise, use the configured search window
+      // Otherwise, use the requested window (or configured search window if there's a conflict)
       let searchStart: Date
       let searchEnd: Date
       
@@ -242,13 +239,19 @@ export class OptimizedConflictDetection {
         searchEnd.setHours(23, 59, 59, 999)
         
         console.log(`🔍 Office hours violation detected - searching entire day for available slots within office hours`)
-      } else {
-        // Regular conflict: use configured search window
+      } else if (conflictCheck.hasConflict) {
+        // Regular conflict: use configured search window around requested time
         const searchWindow = searchWindowHours * 60 * 60 * 1000
         searchStart = new Date(requestedStart.getTime() - searchWindow)
         searchEnd = new Date(requestedEnd.getTime() + searchWindow)
         
-        console.log(`🔍 Searching ${searchWindowHours}h window for alternatives`)
+        console.log(`🔍 Conflict detected - searching ${searchWindowHours}h window for alternatives`)
+      } else {
+        // No conflict: use the requested window to generate slots within it
+        searchStart = requestedStart
+        searchEnd = requestedEnd
+        
+        console.log(`✅ No conflicts in requested window - generating slots within ${requestedStart.toISOString()} to ${requestedEnd.toISOString()}`)
       }
       
       // Use CalendarService to support both Microsoft and Google
@@ -270,19 +273,12 @@ export class OptimizedConflictDetection {
           endDateTime: searchEnd.toISOString(),
           timeZone,
         },
-        undefined // agentId - will use connection from clientId
+        agentId,
+        calendarConnectionId || connection.id
       )
 
-      if (!eventsResult.success || !eventsResult.events) {
-        console.log(`⚠️ No events found or error fetching events: ${eventsResult.error}`)
-        return {
-          hasConflict: false,
-          availableSlots: []
-        }
-      }
-
-      // Convert to sorted busy periods
-      const sortedBusyPeriods = eventsResult.events
+      // Convert to sorted busy periods (empty array if no events)
+      const sortedBusyPeriods = (eventsResult.events || [])
         .map(event => ({
           id: event.id,
           start: new Date(event.start.dateTime),
@@ -291,7 +287,15 @@ export class OptimizedConflictDetection {
         }))
         .sort((a, b) => a.start.getTime() - b.start.getTime())
 
+      if (!eventsResult.success) {
+        console.log(`⚠️ Error fetching events: ${eventsResult.error}`)
+        // Still try to generate slots even if there was an error fetching events
+      } else if (sortedBusyPeriods.length === 0) {
+        console.log(`✅ No events found - calendar is completely free in search window`)
+      }
+
       // Find available slots using optimized algorithm
+      // This will generate slots even when there are no conflicts
       const availableSlots = this.findOptimalSlots(
         requestedStart,
         requestedEnd,
@@ -302,10 +306,10 @@ export class OptimizedConflictDetection {
         agentTimezone
       )
 
-      console.log(`💡 Found ${availableSlots.length} optimized alternative slots`)
+      console.log(`💡 Found ${availableSlots.length} available slots`)
 
       return {
-        hasConflict: true,
+        hasConflict: conflictCheck.hasConflict,
         availableSlots,
         conflictDetails: conflictCheck.conflictDetails
       }
