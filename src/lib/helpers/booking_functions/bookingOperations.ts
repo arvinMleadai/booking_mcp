@@ -74,6 +74,14 @@ export class BookingOperations {
       const calendarConnectionId =
         request.calendarId || inferredPipeline?.calendar_id || undefined;
 
+      console.log(`📅 Calendar selection context:`, {
+        explicitCalendarId: request.calendarId || 'not provided',
+        pipelineCalendarId: inferredPipeline?.calendar_id || 'pipeline has no calendar_id',
+        finalCalendarConnectionId: calendarConnectionId || 'none (will use agent or client fallback)',
+        agentId: request.agentId,
+      });
+
+
       // Step 1: Validate agent and calendar
       console.log(`Validating agent: ${request.agentId}`);
       const validation = await validateAgentHasCalendar(
