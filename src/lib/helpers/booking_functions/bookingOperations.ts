@@ -48,11 +48,18 @@ export class BookingOperations {
 
     try {
       // Pipeline/stage/deal metadata (used for subject + pipeline calendar fallback)
+      console.log(`Fetching metadata - boardId: ${request.boardId}, stageId: ${request.stageId}, dealId: ${request.dealId}`);
       const [pipeline, stage, deal] = await Promise.all([
         request.boardId ? getPipelineById(request.boardId, request.clientId) : null,
         request.stageId ? getPipelineStageById(request.stageId) : null,
         typeof request.dealId === "number" ? getStageItemById(request.dealId) : null,
       ]);
+      
+      console.log(`Metadata fetched:`, {
+        pipeline: pipeline ? { id: pipeline.id, name: pipeline.name, calendar_id: pipeline.calendar_id } : null,
+        stage: stage ? { id: stage.id, name: stage.name } : null,
+        deal: deal ? { id: deal.id, party_id: deal.party_id, summary: deal.summary } : null,
+      });
 
       // If stageId is provided but boardId is missing, infer boardId from stage.pipeline_id
       const inferredBoardId = !request.boardId && stage?.pipeline_id ? stage.pipeline_id : undefined;
@@ -83,6 +90,8 @@ export class BookingOperations {
       }
 
       // Step 2: Get full agent details with calendar
+      // IMPORTANT: Always use the agent from request.agentId, even when using pipeline calendar
+      console.log(`🔍 Fetching agent details for UUID: ${request.agentId}`);
       const agent = await getAgentWithCalendarByUUID(
         request.agentId,
         request.clientId
@@ -95,77 +104,91 @@ export class BookingOperations {
         };
       }
 
-      console.log(`Agent validated: ${agent.name}`);
+      console.log(`✅ Agent validated: ${agent.name} (UUID: ${agent.uuid}, Title: ${agent.title})`);
+      console.log(`📅 Calendar selection: Using ${calendarConnectionId ? 'pipeline/board calendar' : 'agent calendar'} for booking, but agent info from: ${agent.name}`);
 
       // Step 3: Search for customer/contact in database
       // Improved lookup: Use dealId/party_id first, then fall back to fuzzy search
-      console.log(`Searching for customer/contact: "${request.customerName}"`);
+      console.log(`Searching for customer/contact${request.customerName ? `: "${request.customerName}"` : " (name not provided, will fetch from dealId if available)"}`);
       let customer: Customer | null = null;
       let customerEmail = request.customerEmail;
       let customerPhoneNumber = request.customerPhoneNumber;
-      let customerDisplayName = request.customerName;
+      let customerDisplayName = request.customerName || "";
       let searchSource: "customer" | "contact" | "manual" | "deal" = "manual";
 
       // Priority 1: If dealId is provided, look up customer/contact via party_id
-      if (deal?.party_id) {
-        try {
-          console.log(`Looking up customer/contact from deal party_id: ${deal.party_id}`);
-          const partyInfo = await getPartyContactInfo(deal.party_id, request.clientId);
+      if (typeof request.dealId === "number") {
+        if (!deal) {
+          console.warn(`⚠️ Deal ID ${request.dealId} provided but deal not found in database`);
+        } else if (!deal.party_id) {
+          console.warn(`⚠️ Deal ID ${request.dealId} found but has no party_id`);
+        } else {
+          try {
+            console.log(`🔍 Looking up customer/contact from deal party_id: ${deal.party_id} (dealId: ${request.dealId})`);
+            const partyInfo = await getPartyContactInfo(deal.party_id, request.clientId);
 
-          if (partyInfo) {
-            console.log(`Found via deal party_id:`, {
-              type: partyInfo.type,
-              name: partyInfo.name,
-              email: partyInfo.email,
-              phone: partyInfo.phone,
-            });
+            if (partyInfo) {
+              console.log(`✅ Found via deal party_id:`, {
+                type: partyInfo.type,
+                name: partyInfo.name,
+                email: partyInfo.email || "(no email)",
+                phone: partyInfo.phone || "(no phone)",
+                company: partyInfo.company || "(no company)",
+              });
 
-            // Use party info if not explicitly overridden in request
-            if (!request.customerEmail && partyInfo.email) {
-              customerEmail = partyInfo.email;
-            }
-            if (!request.customerPhoneNumber && partyInfo.phone) {
-              customerPhoneNumber = partyInfo.phone;
-            }
-            if (!request.customerName || request.customerName === customerDisplayName) {
-              customerDisplayName = partyInfo.name;
-            }
-            searchSource = partyInfo.type === "customer" ? "customer" : "contact";
+              // Use party info if not explicitly overridden in request
+              if (!request.customerEmail && partyInfo.email) {
+                customerEmail = partyInfo.email;
+                console.log(`📧 Using email from deal: ${partyInfo.email}`);
+              }
+              if (!request.customerPhoneNumber && partyInfo.phone) {
+                customerPhoneNumber = partyInfo.phone;
+                console.log(`📱 Using phone from deal: ${partyInfo.phone}`);
+              }
+              if (!request.customerName || request.customerName === customerDisplayName) {
+                customerDisplayName = partyInfo.name;
+                console.log(`👤 Using name from deal: ${partyInfo.name}`);
+              }
+              searchSource = partyInfo.type === "customer" ? "customer" : "contact";
 
-            // Mark as found via deal lookup
-            if (partyInfo.type === "customer") {
-              customer = {
-                id: partyInfo.id,
-                client_id: request.clientId,
-                full_name: partyInfo.name,
-                email: partyInfo.email,
-                phone: partyInfo.phone,
-                company: partyInfo.company,
-                created_at: "",
-                updated_at: "",
-              } as Customer;
+              // Mark as found via deal lookup
+              if (partyInfo.type === "customer") {
+                customer = {
+                  id: partyInfo.id,
+                  client_id: request.clientId,
+                  full_name: partyInfo.name,
+                  email: partyInfo.email,
+                  phone: partyInfo.phone,
+                  company: partyInfo.company,
+                  created_at: "",
+                  updated_at: "",
+                } as Customer;
+              }
+            } else {
+              console.warn(`⚠️ No customer/contact found for party_id: ${deal.party_id} (dealId: ${request.dealId})`);
             }
-          } else {
-            console.log(`No customer/contact found for party_id: ${deal.party_id}`);
+          } catch (error) {
+            console.error(`❌ Error looking up party contact info for party_id ${deal.party_id}:`, error);
           }
-        } catch (error) {
-          console.error("Error looking up party contact info:", error);
         }
+      } else {
+        console.log(`ℹ️ No dealId provided, skipping deal-based customer lookup`);
       }
 
       // Priority 2: If we still don't have email/phone, try fuzzy search
-      // Only search if we're missing at least one contact method
+      // Only search if we're missing at least one contact method AND we have a customerName to search with
       const hasEmail = customerEmail || request.customerEmail;
       const hasPhone = customerPhoneNumber || request.customerPhoneNumber;
       // We need fuzzy search if we don't have both email and phone
       // (We need at least one, but it's better to have both)
-      const needsFuzzySearch = !hasEmail || !hasPhone;
+      // Also need customerName to perform fuzzy search
+      const needsFuzzySearch = (!hasEmail || !hasPhone) && request.customerName;
 
       if (needsFuzzySearch) {
         // First, try searching in customers database
         try {
           const customerResults = await getCustomerWithFuzzySearch(
-            request.customerName,
+            request.customerName!,
             request.clientId.toString()
           );
 
@@ -212,7 +235,7 @@ export class BookingOperations {
         }
 
         // If not found in customers, try searching in contacts
-        if (!customerEmail && !request.customerEmail) {
+        if (!customerEmail && !request.customerEmail && request.customerName) {
           try {
             const contactResults = await getContactWithFuzzySearch(
               request.customerName,
@@ -261,10 +284,17 @@ export class BookingOperations {
 
       // Validate that we have either email or phone number for communication
       if (!customerEmail && !customerPhoneNumber) {
+        const customerNameDisplay = customerDisplayName || request.customerName || "Customer";
         return {
           success: false,
-          error: `"${request.customerName}" not found in customers or contacts. Please provide either customerEmail or customerPhoneNumber to book the appointment.`,
+          error: `${customerNameDisplay} not found in customers or contacts, and no contact information available from dealId. Please provide either customerEmail or customerPhoneNumber to book the appointment.`,
         };
+      }
+
+      // Validate that we have a display name (from dealId, request, or fallback)
+      if (!customerDisplayName) {
+        customerDisplayName = customerEmail?.split("@")[0] || customerPhoneNumber || "Customer";
+        console.log(`⚠️ No customer name available, using fallback: ${customerDisplayName}`);
       }
 
       if (customerEmail) {
@@ -366,11 +396,19 @@ export class BookingOperations {
         isOnlineMeeting: request.isOnlineMeeting,
       };
 
+      // IMPORTANT: When using pipeline/board calendar (calendarConnectionId),
+      // we still want to use the agent from request.agentId for agent info,
+      // but use the pipeline calendar for the actual booking.
+      // 
+      // If calendarConnectionId is provided, don't pass agentId to createEvent
+      // because getConnection will prioritize calendarConnectionId anyway,
+      // and we don't want it to fall back to agent's calendar if pipeline calendar fails.
+      // The agent info in the response comes from the 'agent' variable above, not from the calendar.
       const result = await CalendarService.createEvent(
         request.clientId,
         calendarServiceRequest,
-        request.agentId, // agent calendar when available
-        calendarConnectionId // pipeline/explicit calendar connection override
+        calendarConnectionId ? undefined : request.agentId, // Only pass agentId if no calendar override
+        calendarConnectionId // pipeline/explicit calendar connection override (takes priority)
       );
 
       if (!result.success) {
@@ -491,11 +529,53 @@ export class BookingOperations {
     console.table(request);
 
     try {
-      // Pipeline calendar fallback (used when agent has no calendar assignment)
-      const [pipeline, stage] = await Promise.all([
+      // Pipeline/stage/deal metadata (used for calendar selection + logging)
+      console.log(`Fetching metadata - boardId: ${request.boardId}, stageId: ${request.stageId}, dealId: ${request.dealId}`);
+      const [pipeline, stage, deal] = await Promise.all([
         request.boardId ? getPipelineById(request.boardId, request.clientId) : null,
         request.stageId ? getPipelineStageById(request.stageId) : null,
+        typeof request.dealId === "number" ? getStageItemById(request.dealId) : null,
       ]);
+      
+      console.log(`Metadata fetched:`, {
+        pipeline: pipeline ? { id: pipeline.id, name: pipeline.name, calendar_id: pipeline.calendar_id } : null,
+        stage: stage ? { id: stage.id, name: stage.name } : null,
+        deal: deal ? { id: deal.id, party_id: deal.party_id, summary: deal.summary } : null,
+      });
+
+      // Look up customer/contact info from dealId if provided (for logging and potential future use)
+      if (typeof request.dealId === "number" && deal?.party_id) {
+        try {
+          console.log(`🔍 [FindAvailableSlots] Looking up customer/contact from deal party_id: ${deal.party_id} (dealId: ${request.dealId})`);
+          const partyInfo = await getPartyContactInfo(deal.party_id, request.clientId);
+
+          if (partyInfo) {
+            console.log(`✅ [FindAvailableSlots] Found customer/contact via deal party_id:`, {
+              type: partyInfo.type,
+              id: partyInfo.id,
+              name: partyInfo.name,
+              email: partyInfo.email || "(no email)",
+              phone: partyInfo.phone || "(no phone)",
+              company: partyInfo.company || "(no company)",
+            });
+            console.log(`📋 [FindAvailableSlots] Customer details available for booking:`, {
+              name: partyInfo.name,
+              email: partyInfo.email ? "✅ Available" : "❌ Not available",
+              phone: partyInfo.phone ? "✅ Available" : "❌ Not available",
+            });
+          } else {
+            console.warn(`⚠️ [FindAvailableSlots] No customer/contact found for party_id: ${deal.party_id} (dealId: ${request.dealId})`);
+          }
+        } catch (error) {
+          console.error(`❌ [FindAvailableSlots] Error looking up party contact info for party_id ${deal.party_id}:`, error);
+        }
+      } else if (typeof request.dealId === "number") {
+        if (!deal) {
+          console.warn(`⚠️ [FindAvailableSlots] Deal ID ${request.dealId} provided but deal not found in database`);
+        } else if (!deal.party_id) {
+          console.warn(`⚠️ [FindAvailableSlots] Deal ID ${request.dealId} found but has no party_id`);
+        }
+      }
 
       const inferredBoardId = !request.boardId && stage?.pipeline_id ? stage.pipeline_id : undefined;
       const inferredPipeline =
@@ -545,11 +625,48 @@ export class BookingOperations {
       // Parse dates in the agent's timezone (not UTC)
       // This ensures 9 AM means 9 AM in the agent's timezone, not UTC
       let targetDate: DateTime;
+      const lowerDate = request.preferredDate.toLowerCase();
+      const nowInTZ = DateTime.now().setZone(agentTimezone);
       
-      if (request.preferredDate.toLowerCase() === "today") {
-        targetDate = DateTime.now().setZone(agentTimezone);
-      } else if (request.preferredDate.toLowerCase() === "tomorrow") {
-        targetDate = DateTime.now().setZone(agentTimezone).plus({ days: 1 });
+      if (lowerDate === "today") {
+        targetDate = nowInTZ;
+      } else if (lowerDate === "tomorrow") {
+        targetDate = nowInTZ.plus({ days: 1 });
+      } else if (/^(this|next) (monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(lowerDate)) {
+        // Handle "this monday", "next friday", etc.
+        const match = lowerDate.match(/^(this|next) (monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/);
+        if (match) {
+          const [, prefix, dayName] = match;
+          const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+          const targetDayIndex = dayNames.indexOf(dayName);
+          const currentWeekday = nowInTZ.weekday === 7 ? 0 : nowInTZ.weekday; // Convert Luxon weekday (1=Mon, 7=Sun) to array index (0=Sun, 6=Sat)
+          
+          let diff = (targetDayIndex - currentWeekday + 7) % 7;
+          
+          if (prefix === "next") {
+            // For "next", always get the next occurrence (even if it's today)
+            diff = diff === 0 ? 7 : diff;
+          } else {
+            // For "this", use today if it matches, otherwise next occurrence
+            diff = diff === 0 ? 0 : diff;
+          }
+          
+          targetDate = nowInTZ.plus({ days: diff });
+        } else {
+          // Fallback to today if parsing fails
+          targetDate = nowInTZ;
+        }
+      } else if (/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(lowerDate)) {
+        // Handle bare day names like "monday" - treat as "this monday" or "next monday" if today
+        const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+        const targetDayIndex = dayNames.indexOf(lowerDate);
+        const currentWeekday = nowInTZ.weekday === 7 ? 0 : nowInTZ.weekday;
+        
+        let diff = (targetDayIndex - currentWeekday + 7) % 7;
+        // If it's today, use today; otherwise get next occurrence
+        diff = diff === 0 ? 0 : diff;
+        
+        targetDate = nowInTZ.plus({ days: diff });
       } else {
         // Parse as date string (YYYY-MM-DD) in agent's timezone
         targetDate = DateTime.fromISO(request.preferredDate, { zone: agentTimezone });
@@ -557,6 +674,12 @@ export class BookingOperations {
         // If parsing failed, try as a date-only string
         if (!targetDate.isValid) {
           targetDate = DateTime.fromFormat(request.preferredDate, 'yyyy-MM-dd', { zone: agentTimezone });
+        }
+        
+        // If still invalid, default to today
+        if (!targetDate.isValid) {
+          console.warn(`⚠️ Could not parse date "${request.preferredDate}", defaulting to today`);
+          targetDate = nowInTZ;
         }
       }
       
@@ -913,52 +1036,54 @@ export class BookingOperations {
       let foundPhone = false;
 
       try {
-        // Try customers first
-        const customerResults = await getCustomerWithFuzzySearch(
-          request.customerName,
-          request.clientId.toString()
-        );
-
-        if (customerResults && customerResults.length > 0) {
-          const customerData = customerResults[0].item as {
-            id: number;
-            full_name: string;
-            email?: string;
-            phone_number?: string;
-            company?: string;
-          };
-          customer = {
-            id: customerData.id,
-            client_id: request.clientId,
-            full_name: customerData.full_name,
-            email: customerData.email,
-            phone: customerData.phone_number,
-            company: customerData.company,
-            created_at: "",
-            updated_at: "",
-          } as Customer;
-          if (customer.email || request.customerEmail) {
-            foundEmail = true;
-          }
-          if (customer.phone || request.customerPhoneNumber) {
-            foundPhone = true;
-          }
-        }
-
-        // If not found in customers, try contacts
-        if ((!foundEmail && !request.customerEmail) || (!foundPhone && !request.customerPhoneNumber)) {
-          const contactResults = await getContactWithFuzzySearch(
+        // Try customers first (only if customerName is provided)
+        if (request.customerName) {
+          const customerResults = await getCustomerWithFuzzySearch(
             request.customerName,
             request.clientId.toString()
           );
 
-          if (contactResults && contactResults.length > 0) {
-            const contact = contactResults[0].item as { email?: string; phone_number?: string };
-            if (contact.email) {
+          if (customerResults && customerResults.length > 0) {
+            const customerData = customerResults[0].item as {
+              id: number;
+              full_name: string;
+              email?: string;
+              phone_number?: string;
+              company?: string;
+            };
+            customer = {
+              id: customerData.id,
+              client_id: request.clientId,
+              full_name: customerData.full_name,
+              email: customerData.email,
+              phone: customerData.phone_number,
+              company: customerData.company,
+              created_at: "",
+              updated_at: "",
+            } as Customer;
+            if (customer.email || request.customerEmail) {
               foundEmail = true;
             }
-            if (contact.phone_number) {
+            if (customer.phone || request.customerPhoneNumber) {
               foundPhone = true;
+            }
+          }
+
+          // If not found in customers, try contacts
+          if ((!foundEmail && !request.customerEmail) || (!foundPhone && !request.customerPhoneNumber)) {
+            const contactResults = await getContactWithFuzzySearch(
+              request.customerName,
+              request.clientId.toString()
+            );
+
+            if (contactResults && contactResults.length > 0) {
+              const contact = contactResults[0].item as { email?: string; phone_number?: string };
+              if (contact.email) {
+                foundEmail = true;
+              }
+              if (contact.phone_number) {
+                foundPhone = true;
+              }
             }
           }
         }
