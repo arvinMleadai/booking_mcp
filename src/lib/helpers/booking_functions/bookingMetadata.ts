@@ -96,4 +96,75 @@ export function buildBookingSubject(params: {
   return fallbackSubject || customerDisplayName || "Appointment";
 }
 
+/**
+ * Customer/Contact info from party_id lookup
+ */
+export type PartyContactInfo = {
+  type: "customer" | "contact";
+  id: number;
+  name: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+};
+
+/**
+ * Get customer or contact information from party_id
+ * Tries customers table first, then contacts table
+ */
+export async function getPartyContactInfo(
+  partyId: number,
+  clientId: number
+): Promise<PartyContactInfo | null> {
+  const supabase = createClient();
+
+  // First, try to find in customers table
+  const { data: customer, error: customerError } = await supabase
+    .schema("public")
+    .from("customers")
+    .select("id, full_name, email, phone, company")
+    .eq("id", partyId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+
+  if (!customerError && customer) {
+    return {
+      type: "customer",
+      id: customer.id,
+      name: customer.full_name,
+      email: customer.email || undefined,
+      phone: customer.phone || undefined,
+      company: customer.company || undefined,
+    };
+  }
+
+  // If not found in customers, try contacts table
+  const { data: contact, error: contactError } = await supabase
+    .schema("public")
+    .from("contacts")
+    .select("id, name, first_name, last_name, email, phone_number, company")
+    .eq("id", partyId)
+    .eq("client_id", clientId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!contactError && contact) {
+    const name =
+      contact.name ||
+      `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
+      "Unknown";
+
+    return {
+      type: "contact",
+      id: contact.id,
+      name,
+      email: contact.email || undefined,
+      phone: contact.phone_number || undefined,
+      company: contact.company || undefined,
+    };
+  }
+
+  return null;
+}
+
 
