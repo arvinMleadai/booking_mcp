@@ -409,7 +409,9 @@ const handler = createMcpHandler(
           }
 
           if (result.agent) {
-            responseText += `\nAgent: ${result.agent.name} - ${result.agent.title}\n`;
+            // Use profile name for customer-facing text, not agent name
+            const profileName = (Array.isArray(result.agent.profiles) ? result.agent.profiles[0]?.name : result.agent.profiles?.name) || result.agent.name;
+            responseText += `\nAgent: ${profileName} - ${result.agent.title}\n`;
           }
 
           if (result.event?.location?.displayName) {
@@ -618,7 +620,9 @@ const handler = createMcpHandler(
           }
 
           let responseText = `AVAILABLE TIME SLOTS\n\n`;
-          responseText += `Agent: ${result.agent?.name}\n`;
+          // Use profile name for customer-facing text, not agent name
+          const profileName = result.agent?.profiles ? (Array.isArray(result.agent.profiles) ? result.agent.profiles[0]?.name : result.agent.profiles?.name) : result.agent?.name;
+          responseText += `Agent: ${profileName || result.agent?.name}\n`;
           responseText += `Date: ${preferredDate}\n`;
           responseText += `Duration: ${durationMinutes || 60} minutes\n\n`;
 
@@ -865,7 +869,9 @@ const handler = createMcpHandler(
           responseText += `Update notifications sent to all attendees.`;
 
           if (result.agent) {
-            responseText += `\n\nAgent: ${result.agent.name}`;
+            // Use profile name for customer-facing text, not agent name
+            const profileName = (Array.isArray(result.agent.profiles) ? result.agent.profiles[0]?.name : result.agent.profiles?.name) || result.agent.name;
+            responseText += `\n\nAgent: ${profileName}`;
           }
 
           return {
