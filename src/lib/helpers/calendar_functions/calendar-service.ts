@@ -29,13 +29,33 @@ export class CalendarService {
     agentId?: string,
     calendarConnectionId?: string
   ): Promise<GraphCalendarConnection | null> {
+    // Priority 1: Explicit calendar override (board/pipeline calendar)
     if (calendarConnectionId) {
+      console.log(`📅 Using explicit calendar connection: ${calendarConnectionId}`)
       return await getCalendarConnectionById(calendarConnectionId, clientId)
     }
+    
+    // Priority 2: Agent's assigned calendar
     if (agentId) {
-      return await getCalendarConnectionByAgentId(agentId, clientId)
+      console.log(`📅 Checking agent calendar for: ${agentId}`)
+      const agentCalendar = await getCalendarConnectionByAgentId(agentId, clientId)
+      if (agentCalendar) {
+        console.log(`✅ Using agent's calendar: ${agentCalendar.email}`)
+        return agentCalendar
+      }
+      console.warn(`⚠️ Agent ${agentId} has no calendar assigned`)
     }
-    return await getCalendarConnectionByClientId(clientId)
+    
+    // Priority 3: Client-level fallback (only if no agent specified)
+    // This is the "receptionist" or default calendar
+    if (!agentId) {
+      console.log(`📅 Using client-level calendar (no agent specified)`)
+      return await getCalendarConnectionByClientId(clientId)
+    }
+    
+    // If agent specified but has no calendar, and no board calendar provided, return null
+    console.error(`❌ No calendar found: Agent ${agentId} has no calendar, and no board calendar provided`)
+    return null
   }
 
   /**
