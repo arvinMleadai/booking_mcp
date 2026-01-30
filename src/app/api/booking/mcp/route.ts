@@ -12,32 +12,34 @@ import type {
 const handler = createMcpHandler(
   (server) => {
     // ListAgents - List all agents with calendar assignments
-    server.tool(
+    server.registerTool(
       "ListAgents",
-      "List all available agents for a client. Shows which agents have calendar connections for booking appointments.",
       {
-        clientId: z
-          .union([z.number(), z.string().transform(Number)])
-          .describe("Client ID number (e.g., 10000002)"),
-        includeDedicated: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe("Include dedicated agents: true/false (default: true)"),
-        withCalendarOnly: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe(
-            "Show only agents with calendar connections: true/false (default: false)"
-          ),
+        description: "List all available agents for a client. Shows which agents have calendar connections for booking appointments.",
+        inputSchema: {
+          clientId: z
+            .union([z.number(), z.string().transform(Number)])
+            .describe("Client ID number (e.g., 10000002)"),
+          includeDedicated: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe("Include dedicated agents: true/false (default: true)"),
+          withCalendarOnly: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe(
+              "Show only agents with calendar connections: true/false (default: false)"
+            ),
+        },
       },
-      async (input) => {
+      async (args) => {
         try {
-          const { clientId, includeDedicated, withCalendarOnly } = input;
+          const { clientId, includeDedicated, withCalendarOnly } = args;
 
           console.log("list agents (Booking MCP)");
-          console.table(input);
+          console.table(args);
 
           // Convert and validate clientId
           const numericClientId =
@@ -149,81 +151,108 @@ const handler = createMcpHandler(
     );
 
     // BookCustomerAppointment - Book a new appointment for a customer
-    server.tool(
+    server.registerTool(
       "BookCustomerAppointment",
-      "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.",
       {
-        clientId: z
-          .union([z.number(), z.string().transform(Number)])
-          .describe("Client ID number (e.g., 10000002)"),
-        agentId: z
-          .string()
-          .uuid()
-          .describe(
-            "Agent UUID from ListAgents tool (e.g., '550e8400-e29b-41d4-a716-446655440000')"
-          ),
-        customerName: z
-          .string()
-          .describe(
-            "Customer name to search in database: 'John Smith' (finds email and details automatically)"
-          ),
-        customerEmail: z
-          .string()
-          .email()
-          .optional()
-          .describe(
-            "Customer email: 'john@company.com' (optional if customer exists in database)"
-          ),
-        customerPhoneNumber: z
-          .string()
-          .optional()
-          .describe(
-            "Customer phone number: '+1234567890' (optional, will be fetched from customer/contact if not provided)"
-          ),
-        subject: z
-          .string()
-          .describe(
-            "Meeting title (e.g., 'Sales Call with John Smith' or 'Product Demo')"
-          ),
-        startDateTime: z
-          .string()
-          .describe(
-            "Start time: '2025-12-06T13:00:00' (must be at least 15 minutes in future)"
-          ),
-        endDateTime: z
-          .string()
-          .describe(
-            "End time: '2025-12-06T14:00:00' (must be after start time)"
-          ),
-        description: z
-          .string()
-          .optional()
-          .describe("Meeting description or notes (optional)"),
-        location: z
-          .string()
-          .optional()
-          .describe(
-            "Meeting location: 'Conference Room A' or address (optional)"
-          ),
-        isOnlineMeeting: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe(
-            "Create Teams/Meet meeting: true/false (default: true, depends on calendar provider)"
-          ),
-        calendarId: z
-          .string()
-          .optional()
-          .describe(
-            "Calendar ID (optional, uses agent's assigned calendar if not specified)"
-          ),
+        description: "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.",
+        inputSchema: {
+          clientId: z
+            .union([z.number(), z.string().transform(Number)])
+            .describe("Client ID number (e.g., 10000002)"),
+          agentId: z
+            .string()
+            .uuid()
+            .describe(
+              "Agent UUID from ListAgents tool (e.g., '550e8400-e29b-41d4-a716-446655440000')"
+            ),
+          boardId: z
+            .string()
+            .uuid()
+            .optional()
+            .describe(
+              "Pipeline/board UUID (optional). If provided, uses the pipeline's assigned calendar connection for booking."
+            ),
+          stageId: z
+            .string()
+            .uuid()
+            .optional()
+            .describe(
+              "Pipeline stage UUID (optional). Used to build a better appointment subject."
+            ),
+          dealId: z
+            .union([z.number(), z.string().transform(Number)])
+            .optional()
+            .describe(
+              "Deal ID (stage_items.id) (optional). Used to build a better appointment subject."
+            ),
+          customerName: z
+            .string()
+            .describe(
+              "Customer name to search in database: 'John Smith' (finds email and details automatically)"
+            ),
+          customerEmail: z
+            .string()
+            .email()
+            .optional()
+            .describe(
+              "Customer email: 'john@company.com' (optional if customer exists in database)"
+            ),
+          customerPhoneNumber: z
+            .string()
+            .optional()
+            .describe(
+              "Customer phone number: '+1234567890' (optional, will be fetched from customer/contact if not provided)"
+            ),
+          subject: z
+            .string()
+            .optional()
+            .default("")
+            .describe(
+              "Meeting title (optional). If stageId/dealId is provided, subject will be generated from stage/deal metadata."
+            ),
+          startDateTime: z
+            .string()
+            .describe(
+              "Start time: '2025-12-06T13:00:00' (must be at least 15 minutes in future)"
+            ),
+          endDateTime: z
+            .string()
+            .describe(
+              "End time: '2025-12-06T14:00:00' (must be after start time)"
+            ),
+          description: z
+            .string()
+            .optional()
+            .describe("Meeting description or notes (optional)"),
+          location: z
+            .string()
+            .optional()
+            .describe(
+              "Meeting location: 'Conference Room A' or address (optional)"
+            ),
+          isOnlineMeeting: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe(
+              "Create Teams/Meet meeting: true/false (default: true, depends on calendar provider)"
+            ),
+          calendarId: z
+            .string()
+            .optional()
+            .describe(
+              "Calendar connection ID override (optional). Uses this calendar connection instead of the agent/pipeline selection."
+            ),
+        },
       },
-      async (input) => {
+      async (args) => {
         try {
           const {
             clientId,
             agentId,
+            boardId,
+            stageId,
+            dealId,
             customerName,
             customerEmail,
             customerPhoneNumber,
@@ -234,10 +263,10 @@ const handler = createMcpHandler(
             location,
             isOnlineMeeting,
             calendarId,
-          } = input;
+          } = args;
 
           console.log("book customer appointment (Booking MCP)");
-          console.table(input);
+          console.table(args);
 
           // Convert and validate clientId
           const numericClientId =
@@ -257,6 +286,9 @@ const handler = createMcpHandler(
           const request: BookCustomerAppointmentRequest = {
             clientId: numericClientId,
             agentId,
+            boardId,
+            stageId,
+            dealId: typeof dealId === "number" ? dealId : undefined,
             customerName,
             customerEmail,
             customerPhoneNumber,
@@ -373,47 +405,75 @@ const handler = createMcpHandler(
     );
 
     // FindAvailableBookingSlots - Find available time slots for an agent
-    server.tool(
+    server.registerTool(
       "FindAvailableBookingSlots",
-      "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times.",
       {
-        clientId: z
-          .union([z.number(), z.string().transform(Number)])
-          .describe("Client ID number (e.g., 10000002)"),
-        agentId: z
-          .string()
-          .uuid()
-          .describe("Agent UUID from ListAgents tool"),
-        preferredDate: z
-          .string()
-          .describe(
-            "Preferred date: 'today', 'tomorrow', '2025-12-06' or ISO format"
-          ),
-        durationMinutes: z
-          .number()
-          .optional()
-          .default(60)
-          .describe("Meeting duration in minutes: 30, 60, 90 (default: 60)"),
-        maxSuggestions: z
-          .number()
-          .optional()
-          .default(3)
-          .describe(
-            "Number of alternative slots to suggest: 1-5 (default: 3)"
-          ),
+        description: "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times.",
+        inputSchema: {
+          clientId: z
+            .union([z.number(), z.string().transform(Number)])
+            .describe("Client ID number (e.g., 10000002)"),
+          agentId: z
+            .string()
+            .uuid()
+            .describe("Agent UUID from ListAgents tool"),
+          boardId: z
+            .string()
+            .uuid()
+            .optional()
+            .describe(
+              "Pipeline/board UUID (optional). If provided, uses the pipeline's assigned calendar connection."
+            ),
+          stageId: z
+            .string()
+            .uuid()
+            .optional()
+            .describe("Pipeline stage UUID (optional)."),
+          dealId: z
+            .union([z.number(), z.string().transform(Number)])
+            .optional()
+            .describe("Deal ID (stage_items.id) (optional)."),
+          preferredDate: z
+            .string()
+            .describe(
+              "Preferred date: 'today', 'tomorrow', '2025-12-06' or ISO format"
+            ),
+          durationMinutes: z
+            .number()
+            .optional()
+            .default(60)
+            .describe("Meeting duration in minutes: 30, 60, 90 (default: 60)"),
+          maxSuggestions: z
+            .number()
+            .optional()
+            .default(3)
+            .describe(
+              "Number of alternative slots to suggest: 1-5 (default: 3)"
+            ),
+          calendarId: z
+            .string()
+            .optional()
+            .describe(
+              "Calendar connection ID override (optional). Uses this calendar connection instead of the agent/pipeline selection."
+            ),
+        },
       },
-      async (input) => {
+      async (args) => {
         try {
           const {
             clientId,
             agentId,
+            boardId,
+            stageId,
+            dealId,
             preferredDate,
             durationMinutes,
             maxSuggestions,
-          } = input;
+            calendarId,
+          } = args;
 
           console.log("find available booking slots (Booking MCP)");
-          console.table(input);
+          console.table(args);
 
           // Convert and validate clientId
           const numericClientId =
@@ -433,9 +493,13 @@ const handler = createMcpHandler(
           const request: FindBookingSlotsRequest = {
             clientId: numericClientId,
             agentId,
+            boardId,
+            stageId,
+            dealId: typeof dealId === "number" ? dealId : undefined,
             preferredDate,
             durationMinutes,
             maxSuggestions,
+            calendarId,
           };
 
           const result = await BookingOperations.findAvailableSlots(request);
@@ -498,41 +562,43 @@ const handler = createMcpHandler(
     );
 
     // CancelCustomerAppointment - Cancel an existing appointment
-    server.tool(
+    server.registerTool(
       "CancelCustomerAppointment",
-      "Cancel a customer appointment. Automatically sends cancellation notifications to all attendees.",
       {
-        clientId: z
-          .union([z.number(), z.string().transform(Number)])
-          .describe("Client ID number (e.g., 10000002)"),
-        agentId: z
-          .string()
-          .uuid()
-          .describe("Agent UUID who owns the calendar"),
-        eventId: z
-          .string()
-          .describe("Event ID to cancel (from booking confirmation)"),
-        calendarId: z
-          .string()
-          .optional()
-          .describe(
-            "Calendar ID (optional, uses agent's assigned calendar if not specified)"
-          ),
-        notifyCustomer: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe(
-            "Send cancellation email: true/false (default: true, handled by calendar provider)"
-          ),
+        description: "Cancel a customer appointment. Automatically sends cancellation notifications to all attendees.",
+        inputSchema: {
+          clientId: z
+            .union([z.number(), z.string().transform(Number)])
+            .describe("Client ID number (e.g., 10000002)"),
+          agentId: z
+            .string()
+            .uuid()
+            .describe("Agent UUID who owns the calendar"),
+          eventId: z
+            .string()
+            .describe("Event ID to cancel (from booking confirmation)"),
+          calendarId: z
+            .string()
+            .optional()
+            .describe(
+              "Calendar ID (optional, uses agent's assigned calendar if not specified)"
+            ),
+          notifyCustomer: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe(
+              "Send cancellation email: true/false (default: true, handled by calendar provider)"
+            ),
+        },
       },
-      async (input) => {
+      async (args) => {
         try {
           const { clientId, agentId, eventId, calendarId, notifyCustomer } =
-            input;
+            args;
 
           console.log("cancel customer appointment (Booking MCP)");
-          console.table(input);
+          console.table(args);
 
           // Convert and validate clientId
           const numericClientId =
@@ -597,41 +663,43 @@ const handler = createMcpHandler(
     );
 
     // RescheduleCustomerAppointment - Reschedule an existing appointment
-    server.tool(
+    server.registerTool(
       "RescheduleCustomerAppointment",
-      "Reschedule a customer appointment to a new time. Validates new time slot and sends update notifications.",
       {
-        clientId: z
-          .union([z.number(), z.string().transform(Number)])
-          .describe("Client ID number (e.g., 10000002)"),
-        agentId: z
-          .string()
-          .uuid()
-          .describe("Agent UUID who owns the calendar"),
-        eventId: z
-          .string()
-          .describe("Event ID to reschedule (from booking confirmation)"),
-        newStartDateTime: z
-          .string()
-          .describe("New start time: '2025-12-07T13:00:00'"),
-        newEndDateTime: z
-          .string()
-          .describe("New end time: '2025-12-07T14:00:00'"),
-        calendarId: z
-          .string()
-          .optional()
-          .describe(
-            "Calendar ID (optional, uses agent's assigned calendar if not specified)"
-          ),
-        notifyCustomer: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe(
-            "Send update email: true/false (default: true, handled by calendar provider)"
-          ),
+        description: "Reschedule a customer appointment to a new time. Validates new time slot and sends update notifications.",
+        inputSchema: {
+          clientId: z
+            .union([z.number(), z.string().transform(Number)])
+            .describe("Client ID number (e.g., 10000002)"),
+          agentId: z
+            .string()
+            .uuid()
+            .describe("Agent UUID who owns the calendar"),
+          eventId: z
+            .string()
+            .describe("Event ID to reschedule (from booking confirmation)"),
+          newStartDateTime: z
+            .string()
+            .describe("New start time: '2025-12-07T13:00:00'"),
+          newEndDateTime: z
+            .string()
+            .describe("New end time: '2025-12-07T14:00:00'"),
+          calendarId: z
+            .string()
+            .optional()
+            .describe(
+              "Calendar ID (optional, uses agent's assigned calendar if not specified)"
+            ),
+          notifyCustomer: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe(
+              "Send update email: true/false (default: true, handled by calendar provider)"
+            ),
+        },
       },
-      async (input) => {
+      async (args) => {
         try {
           const {
             clientId,
@@ -641,10 +709,10 @@ const handler = createMcpHandler(
             newEndDateTime,
             calendarId,
             notifyCustomer,
-          } = input;
+          } = args;
 
           console.log("reschedule customer appointment (Booking MCP)");
-          console.table(input);
+          console.table(args);
 
           // Convert and validate clientId
           const numericClientId =

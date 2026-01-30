@@ -116,6 +116,136 @@ export async function getCalendarConnectionByAgentId(
 }
 
 /**
+ * Get calendar connection by connection ID (lead_dialer.calendar_connections.id)
+ * Useful when a pipeline/board specifies which calendar connection to use.
+ */
+export async function getCalendarConnectionById(
+  connectionId: string,
+  clientId: number,
+  requiredProvider?: 'microsoft' | 'google'
+): Promise<GraphCalendarConnection | null> {
+  try {
+    console.log(`Getting calendar connection ${connectionId} (client ${clientId})`)
+
+    const supabase = createClient()
+
+    const { data: connection, error: connectionError } = await supabase
+      .schema('lead_dialer')
+      .from('calendar_connections')
+      .select('*')
+      .eq('id', connectionId)
+      .eq('client_id', clientId)
+      .eq('is_connected', true)
+      .single()
+
+    if (connectionError || !connection) {
+      console.error(`Calendar connection not found: ${connectionId}`)
+      return null
+    }
+
+    const calendarConnection = connection as GraphCalendarConnection
+
+    // Validate provider if required
+    if (requiredProvider && calendarConnection.provider_name !== requiredProvider) {
+      console.error(
+        `❌ Provider mismatch: Expected ${requiredProvider}, got ${calendarConnection.provider_name}`
+      )
+      return null
+    }
+
+    // Validate token provider matches calendar provider (same rules as other helpers)
+    if (calendarConnection.access_token) {
+      if (calendarConnection.provider_name === 'microsoft') {
+        const tokenParts = calendarConnection.access_token.split('.')
+        if (tokenParts.length !== 3) {
+          console.error(
+            `❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token is not JWT format`
+          )
+          console.error(
+            `Token has ${tokenParts.length} parts (expected 3 for JWT). Token preview: ${calendarConnection.access_token.substring(
+              0,
+              30
+            )}...`
+          )
+          return null
+        }
+
+        const isGoogleToken =
+          calendarConnection.access_token.startsWith('ya29.') ||
+          calendarConnection.access_token.startsWith('1//')
+        if (isGoogleToken) {
+          console.error(
+            `❌ TOKEN PROVIDER MISMATCH: Calendar is Microsoft but token is Google format (ya29. or 1//)`
+          )
+          return null
+        }
+      } else if (calendarConnection.provider_name === 'google') {
+        const tokenParts = calendarConnection.access_token.split('.')
+        const isMicrosoftJWT =
+          tokenParts.length === 3 &&
+          !calendarConnection.access_token.startsWith('ya29.') &&
+          !calendarConnection.access_token.startsWith('1//')
+        if (isMicrosoftJWT) {
+          console.error(
+            `❌ TOKEN PROVIDER MISMATCH: Calendar is Google but token appears to be Microsoft JWT format`
+          )
+          return null
+        }
+      }
+    }
+
+    console.log(`✅ Found ${calendarConnection.provider_name} calendar connection ${connectionId}`)
+    return calendarConnection
+  } catch (error) {
+    console.error('Error getting calendar connection by ID:', error)
+    return null
+  }
+}
+
+/**
+ * Get the calendar connection assigned to a pipeline/board via pipelines.calendar_id.
+ */
+export async function getCalendarConnectionByPipelineId(
+  pipelineId: string,
+  clientId: number,
+  requiredProvider?: 'microsoft' | 'google'
+): Promise<GraphCalendarConnection | null> {
+  try {
+    console.log(`Getting calendar connection for pipeline ${pipelineId} (client ${clientId})`)
+
+    const supabase = createClient()
+
+    const { data: pipeline, error: pipelineError } = await supabase
+      .schema('public')
+      .from('pipelines')
+      .select('id, calendar_id, client_id')
+      .eq('id', pipelineId)
+      .eq('client_id', clientId)
+      .is('deleted_at', null)
+      .single()
+
+    if (pipelineError || !pipeline) {
+      console.error(`Pipeline not found: ${pipelineId}`)
+      return null
+    }
+
+    if (!pipeline.calendar_id) {
+      console.error(`Pipeline ${pipelineId} has no calendar_id configured`)
+      return null
+    }
+
+    return await getCalendarConnectionById(
+      pipeline.calendar_id as unknown as string,
+      clientId,
+      requiredProvider
+    )
+  } catch (error) {
+    console.error('Error getting calendar connection by pipeline ID:', error)
+    return null
+  }
+}
+
+/**
  * Get calendar connection for a client (fallback - gets first Microsoft connection)
  * For agent-specific operations, use getCalendarConnectionByAgentId instead
  */

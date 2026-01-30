@@ -10,7 +10,11 @@ import type {
   GetAvailabilityRequest,
 } from './providers/types'
 import { AdvancedCacheService } from '../cache/advancedCacheService'
-import { getCalendarConnectionByAgentId, getCalendarConnectionByClientId } from './graphDatabase'
+import {
+  getCalendarConnectionByAgentId,
+  getCalendarConnectionByClientId,
+  getCalendarConnectionById,
+} from './graphDatabase'
 
 /**
  * Unified Calendar Service
@@ -22,8 +26,12 @@ export class CalendarService {
    */
   private static async getConnection(
     clientId: number,
-    agentId?: string
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<GraphCalendarConnection | null> {
+    if (calendarConnectionId) {
+      return await getCalendarConnectionById(calendarConnectionId, clientId)
+    }
     if (agentId) {
       return await getCalendarConnectionByAgentId(agentId, clientId)
     }
@@ -47,7 +55,8 @@ export class CalendarService {
   static async getEvents(
     clientId: number,
     request: GetEventsRequest & { dateRequest?: string },
-    agentId?: string
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     events?: CalendarEvent[]
@@ -55,7 +64,7 @@ export class CalendarService {
     error?: string
   }> {
     try {
-      const connection = await this.getConnection(clientId, agentId)
+      const connection = await this.getConnection(clientId, agentId, calendarConnectionId)
       if (!connection) {
         return {
           success: false,
@@ -119,7 +128,8 @@ export class CalendarService {
   static async createEvent(
     clientId: number,
     request: CreateEventRequest,
-    agentId?: string
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     event?: CalendarEvent
@@ -134,7 +144,7 @@ export class CalendarService {
     }>
   }> {
     try {
-      const connection = await this.getConnection(clientId, agentId)
+      const connection = await this.getConnection(clientId, agentId, calendarConnectionId)
       if (!connection) {
         return {
           success: false,
@@ -163,7 +173,8 @@ export class CalendarService {
         timeZone,
         undefined, // officeHours - will be passed from CalendarService.findAvailableSlots
         undefined, // agentTimezone - will be passed from CalendarService.findAvailableSlots
-        clientId // Pass clientId so it can use CalendarService
+        clientId, // Pass clientId so it can use CalendarService
+        connection.id // Ensure conflict detection fetches events from the SAME connection
       )
 
       // Block booking if there's ANY conflict
@@ -180,7 +191,9 @@ export class CalendarService {
             ) || 30,
             maxSuggestions: 3,
           },
-          clientId // Pass clientId so it can use CalendarService
+          clientId,
+          undefined,
+          connection.id
         )
 
         return {
@@ -231,14 +244,15 @@ export class CalendarService {
     clientId: number,
     eventId: string,
     request: UpdateEventRequest,
-    agentId?: string
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     event?: CalendarEvent
     error?: string
   }> {
     try {
-      const connection = await this.getConnection(clientId, agentId)
+      const connection = await this.getConnection(clientId, agentId, calendarConnectionId)
       if (!connection) {
         return {
           success: false,
@@ -290,13 +304,14 @@ export class CalendarService {
     clientId: number,
     eventId: string,
     calendarId?: string,
-    agentId?: string
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     error?: string
   }> {
     try {
-      const connection = await this.getConnection(clientId, agentId)
+      const connection = await this.getConnection(clientId, agentId, calendarConnectionId)
       if (!connection) {
         return {
           success: false,
@@ -422,7 +437,8 @@ export class CalendarService {
    */
   static async checkConnection(
     clientId: number,
-    agentId?: string
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     connected: boolean
@@ -436,7 +452,7 @@ export class CalendarService {
     error?: string
   }> {
     try {
-      const connection = await this.getConnection(clientId, agentId)
+      const connection = await this.getConnection(clientId, agentId, calendarConnectionId)
       if (!connection) {
         return {
           success: true,
@@ -493,7 +509,8 @@ export class CalendarService {
       officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null
       agentTimezone?: string
     } = {},
-    agentId?: string
+    agentId?: string,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     hasConflict: boolean
@@ -508,7 +525,7 @@ export class CalendarService {
     error?: string
   }> {
     try {
-      const connection = await this.getConnection(clientId, agentId)
+      const connection = await this.getConnection(clientId, agentId, calendarConnectionId)
       if (!connection) {
         return {
           success: false,
@@ -545,7 +562,9 @@ export class CalendarService {
           // Use a reasonable search window (4 hours default, or full day if office hours violation)
           searchWindowHours: 4,
         },
-        clientId // Pass clientId so it can use CalendarService
+        clientId,
+        agentId,
+        connection.id
       )
 
       return {

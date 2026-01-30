@@ -472,7 +472,8 @@ export const getAgentsForClient = async (
  */
 export const validateAgentHasCalendar = async (
   agentUUID: string,
-  clientId: number
+  clientId: number,
+  calendarConnectionId?: string
 ): Promise<{
   isValid: boolean;
   error?: string;
@@ -489,31 +490,53 @@ export const validateAgentHasCalendar = async (
     };
   }
 
-  if (!agent.calendar_assignment) {
+  // First choice: explicit calendar connection override (e.g., pipeline/board calendar)
+  if (calendarConnectionId) {
+    const { getCalendarConnectionById } = await import(
+      "./calendar_functions/graphDatabase"
+    );
+    const connection = await getCalendarConnectionById(
+      calendarConnectionId,
+      clientId
+    );
+
+    if (connection?.is_connected) {
+      return {
+        isValid: true,
+        calendarProvider: connection.provider_name as "microsoft" | "google",
+      };
+    }
+  }
+
+  // Fallback: agent-specific calendar assignment (if connected)
+  const agentCalendarConnection = agent.calendar_assignment
+    ?.calendar_connections as unknown as
+    | {
+        id: string;
+        provider_name: string;
+        is_connected: boolean;
+      }
+    | undefined;
+
+  if (agentCalendarConnection?.is_connected) {
     return {
-      isValid: false,
-      error: `Agent "${agent.name}" does not have a calendar assigned. Please assign a calendar connection to this agent first.`,
+      isValid: true,
+      calendarProvider: agentCalendarConnection.provider_name as
+        | "microsoft"
+        | "google",
     };
   }
 
-  const calendarConnection = agent.calendar_assignment
-    .calendar_connections as unknown as {
-    id: string;
-    provider_name: string;
-    is_connected: boolean;
-  };
-
-  if (!calendarConnection || !calendarConnection.is_connected) {
+  // No usable calendar found
+  if (!agent.calendar_assignment) {
     return {
       isValid: false,
-      error: `Agent "${agent.name}" has a calendar assigned but it is not connected. Please reconnect the calendar.`,
+      error: `Agent "${agent.name}" does not have a calendar assigned, and no pipeline/calendar override was provided.`,
     };
   }
 
   return {
-    isValid: true,
-    // Don't return calendarId - let the calendar operations use the primary calendar
-    // The calendarConnection.id is our database UUID, not a Microsoft Graph calendar ID
-    calendarProvider: calendarConnection.provider_name as "microsoft" | "google",
+    isValid: false,
+    error: `Agent "${agent.name}" has a calendar assigned but it is not connected. Please reconnect the calendar.`,
   };
 };

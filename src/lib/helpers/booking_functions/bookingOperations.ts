@@ -14,6 +14,12 @@ import {
   isWithinOfficeHours,
 } from "../utils";
 import { DateTime } from "luxon";
+import {
+  buildBookingSubject,
+  getPipelineById,
+  getPipelineStageById,
+  getStageItemById,
+} from "./bookingMetadata";
 import type {
   BookCustomerAppointmentRequest,
   BookingOperationResponse,
@@ -40,11 +46,32 @@ export class BookingOperations {
     console.table(request);
 
     try {
+      // Pipeline/stage/deal metadata (used for subject + pipeline calendar fallback)
+      const [pipeline, stage, deal] = await Promise.all([
+        request.boardId ? getPipelineById(request.boardId, request.clientId) : null,
+        request.stageId ? getPipelineStageById(request.stageId) : null,
+        typeof request.dealId === "number" ? getStageItemById(request.dealId) : null,
+      ]);
+
+      // If stageId is provided but boardId is missing, infer boardId from stage.pipeline_id
+      const inferredBoardId = !request.boardId && stage?.pipeline_id ? stage.pipeline_id : undefined;
+      const inferredPipeline =
+        !pipeline && inferredBoardId
+          ? await getPipelineById(inferredBoardId, request.clientId)
+          : pipeline;
+
+      // Determine calendar connection override:
+      // - request.calendarId: explicit calendar connection ID override
+      // - pipeline.calendar_id: board-level calendar connection (fallback for shared/non-dedicated agents)
+      const calendarConnectionId =
+        request.calendarId || inferredPipeline?.calendar_id || undefined;
+
       // Step 1: Validate agent and calendar
       console.log(`Validating agent: ${request.agentId}`);
       const validation = await validateAgentHasCalendar(
         request.agentId,
-        request.clientId
+        request.clientId,
+        calendarConnectionId
       );
 
       if (!validation.isValid) {
@@ -223,11 +250,23 @@ export class BookingOperations {
 
       // Step 6: Create calendar event using unified CalendarService
       // Generate a simple default description if none provided
-      const defaultDescription = request.description || 
-        `Scheduled appointment with ${customerDisplayName}`;
+      const defaultDescription =
+        request.description ||
+        [
+          `Scheduled appointment with ${customerDisplayName}`,
+          stage?.name ? `Stage: ${stage.name}` : null,
+          typeof request.dealId === "number" ? `Deal ID: ${request.dealId}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n");
 
-      // Default subject to customer name if not provided
-      const eventSubject = request.subject || customerDisplayName || 'Appointment';
+      const eventSubject = buildBookingSubject({
+        customerDisplayName,
+        stageName: stage?.name,
+        dealId: request.dealId,
+        dealSummary: deal?.summary,
+        fallbackSubject: request.subject,
+      });
 
       console.log(`Creating calendar event via ${validation.calendarProvider}`);
 
@@ -254,7 +293,8 @@ export class BookingOperations {
       const result = await CalendarService.createEvent(
         request.clientId,
         calendarServiceRequest,
-        request.agentId // Pass agentId to use agent's assigned calendar
+        request.agentId, // agent calendar when available
+        calendarConnectionId // pipeline/explicit calendar connection override
       );
 
       if (!result.success) {
@@ -375,10 +415,26 @@ export class BookingOperations {
     console.table(request);
 
     try {
+      // Pipeline calendar fallback (used when agent has no calendar assignment)
+      const [pipeline, stage] = await Promise.all([
+        request.boardId ? getPipelineById(request.boardId, request.clientId) : null,
+        request.stageId ? getPipelineStageById(request.stageId) : null,
+      ]);
+
+      const inferredBoardId = !request.boardId && stage?.pipeline_id ? stage.pipeline_id : undefined;
+      const inferredPipeline =
+        !pipeline && inferredBoardId
+          ? await getPipelineById(inferredBoardId, request.clientId)
+          : pipeline;
+
+      const calendarConnectionId =
+        request.calendarId || inferredPipeline?.calendar_id || undefined;
+
       // Validate agent and calendar
       const validation = await validateAgentHasCalendar(
         request.agentId,
-        request.clientId
+        request.clientId,
+        calendarConnectionId
       );
 
       if (!validation.isValid) {
@@ -456,7 +512,8 @@ export class BookingOperations {
           officeHours: profile?.office_hours as Record<string, { start: string; end: string; enabled: boolean }> || null,
           agentTimezone,
         },
-        request.agentId // Pass agentId to use agent's assigned calendar
+        request.agentId,
+        calendarConnectionId
       );
 
       if (!result.success) {
