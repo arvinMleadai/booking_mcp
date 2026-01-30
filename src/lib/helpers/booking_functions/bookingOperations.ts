@@ -48,35 +48,59 @@ export class BookingOperations {
 
     try {
       // Pipeline/stage/deal metadata (used for subject + pipeline calendar fallback)
+      // ENHANCEMENT: Auto-infer stageId and boardId from dealId if not provided
       console.log(`Fetching metadata - boardId: ${request.boardId}, stageId: ${request.stageId}, dealId: ${request.dealId}`);
-      const [pipeline, stage, deal] = await Promise.all([
-        request.boardId ? getPipelineById(request.boardId, request.clientId) : null,
-        request.stageId ? getPipelineStageById(request.stageId) : null,
-        typeof request.dealId === "number" ? getStageItemById(request.dealId) : null,
-      ]);
       
-      console.log(`Metadata fetched:`, {
+      // Step 1: Fetch deal first if dealId is provided (contains pipeline_stage_id reference)
+      const deal = typeof request.dealId === "number" ? await getStageItemById(request.dealId) : null;
+      
+      if (deal) {
+        console.log(`✅ Deal #${request.dealId} fetched:`, {
+          pipeline_stage_id: deal.pipeline_stage_id,
+          party_id: deal.party_id,
+          summary: deal.summary ? `${deal.summary.substring(0, 50)}...` : null,
+        });
+      }
+      
+      // Step 2: Auto-infer stageId from deal if not explicitly provided
+      const resolvedStageId = request.stageId || deal?.pipeline_stage_id;
+      if (!request.stageId && deal?.pipeline_stage_id) {
+        console.log(`🔄 Auto-inferred stageId from dealId: ${deal.pipeline_stage_id}`);
+      }
+      
+      // Step 3: Fetch stage (either from explicit stageId or auto-inferred from deal)
+      const stage = resolvedStageId ? await getPipelineStageById(resolvedStageId) : null;
+      
+      if (stage) {
+        console.log(`✅ Stage fetched: ${stage.name} (pipeline_id: ${stage.pipeline_id})`);
+      }
+      
+      // Step 4: Auto-infer boardId from stage if not explicitly provided
+      const resolvedBoardId = request.boardId || stage?.pipeline_id;
+      if (!request.boardId && stage?.pipeline_id) {
+        const source = request.stageId ? 'stageId' : 'dealId';
+        console.log(`🔄 Auto-inferred boardId from ${source}: ${stage.pipeline_id}`);
+      }
+      
+      // Step 5: Fetch pipeline (either from explicit boardId or auto-inferred from stage)
+      const pipeline = resolvedBoardId ? await getPipelineById(resolvedBoardId, request.clientId) : null;
+
+      
+      console.log(`Final metadata:`, {
         pipeline: pipeline ? { id: pipeline.id, name: pipeline.name, calendar_id: pipeline.calendar_id } : null,
-        stage: stage ? { id: stage.id, name: stage.name } : null,
+        stage: stage ? { id: stage.id, name: stage.name, pipeline_id: stage.pipeline_id } : null,
         deal: deal ? { id: deal.id, party_id: deal.party_id, summary: deal.summary } : null,
       });
-
-      // If stageId is provided but boardId is missing, infer boardId from stage.pipeline_id
-      const inferredBoardId = !request.boardId && stage?.pipeline_id ? stage.pipeline_id : undefined;
-      const inferredPipeline =
-        !pipeline && inferredBoardId
-          ? await getPipelineById(inferredBoardId, request.clientId)
-          : pipeline;
 
       // Determine calendar connection override:
       // - request.calendarId: explicit calendar connection ID override
       // - pipeline.calendar_id: board-level calendar connection (fallback for shared/non-dedicated agents)
       const calendarConnectionId =
-        request.calendarId || inferredPipeline?.calendar_id || undefined;
+        request.calendarId || pipeline?.calendar_id || undefined;
 
       console.log(`📅 Calendar selection context:`, {
         explicitCalendarId: request.calendarId || 'not provided',
-        pipelineCalendarId: inferredPipeline?.calendar_id || 'pipeline has no calendar_id',
+        pipelineCalendarId: pipeline?.calendar_id || 'pipeline has no calendar_id',
         finalCalendarConnectionId: calendarConnectionId || 'none (will use agent or client fallback)',
         agentId: request.agentId,
       });
@@ -538,61 +562,45 @@ export class BookingOperations {
 
     try {
       // Pipeline/stage/deal metadata (used for calendar selection + logging)
+      // ENHANCEMENT: Auto-infer stageId and boardId from dealId if not provided
       console.log(`Fetching metadata - boardId: ${request.boardId}, stageId: ${request.stageId}, dealId: ${request.dealId}`);
-      const [pipeline, stage, deal] = await Promise.all([
-        request.boardId ? getPipelineById(request.boardId, request.clientId) : null,
-        request.stageId ? getPipelineStageById(request.stageId) : null,
-        typeof request.dealId === "number" ? getStageItemById(request.dealId) : null,
-      ]);
       
-      console.log(`Metadata fetched:`, {
-        pipeline: pipeline ? { id: pipeline.id, name: pipeline.name, calendar_id: pipeline.calendar_id } : null,
-        stage: stage ? { id: stage.id, name: stage.name } : null,
-        deal: deal ? { id: deal.id, party_id: deal.party_id, summary: deal.summary } : null,
-      });
-
-      // Look up customer/contact info from dealId if provided (for logging and potential future use)
-      if (typeof request.dealId === "number" && deal?.party_id) {
-        try {
-          console.log(`🔍 [FindAvailableSlots] Looking up customer/contact from deal party_id: ${deal.party_id} (dealId: ${request.dealId})`);
-          const partyInfo = await getPartyContactInfo(deal.party_id, request.clientId);
-
-          if (partyInfo) {
-            console.log(`✅ [FindAvailableSlots] Found customer/contact via deal party_id:`, {
-              type: partyInfo.type,
-              id: partyInfo.id,
-              name: partyInfo.name,
-              email: partyInfo.email || "(no email)",
-              phone: partyInfo.phone || "(no phone)",
-              company: partyInfo.company || "(no company)",
-            });
-            console.log(`📋 [FindAvailableSlots] Customer details available for booking:`, {
-              name: partyInfo.name,
-              email: partyInfo.email ? "✅ Available" : "❌ Not available",
-              phone: partyInfo.phone ? "✅ Available" : "❌ Not available",
-            });
-          } else {
-            console.warn(`⚠️ [FindAvailableSlots] No customer/contact found for party_id: ${deal.party_id} (dealId: ${request.dealId})`);
-          }
-        } catch (error) {
-          console.error(`❌ [FindAvailableSlots] Error looking up party contact info for party_id ${deal.party_id}:`, error);
-        }
-      } else if (typeof request.dealId === "number") {
-        if (!deal) {
-          console.warn(`⚠️ [FindAvailableSlots] Deal ID ${request.dealId} provided but deal not found in database`);
-        } else if (!deal.party_id) {
-          console.warn(`⚠️ [FindAvailableSlots] Deal ID ${request.dealId} found but has no party_id`);
-        }
+      // Step 1: Fetch deal first if dealId is provided (contains pipeline_stage_id reference)
+      const deal = typeof request.dealId === "number" ? await getStageItemById(request.dealId) : null;
+      
+      if (deal) {
+        console.log(`✅ Deal #${request.dealId} fetched:`, {
+          pipeline_stage_id: deal.pipeline_stage_id,
+          party_id: deal.party_id,
+          summary: deal.summary ? `${deal.summary.substring(0, 50)}...` : null,
+        });
       }
-
-      const inferredBoardId = !request.boardId && stage?.pipeline_id ? stage.pipeline_id : undefined;
-      const inferredPipeline =
-        !pipeline && inferredBoardId
-          ? await getPipelineById(inferredBoardId, request.clientId)
-          : pipeline;
+      
+      // Step 2: Auto-infer stageId from deal if not explicitly provided
+      const resolvedStageId = request.stageId || deal?.pipeline_stage_id;
+      if (!request.stageId && deal?.pipeline_stage_id) {
+        console.log(`� Auto-inferred stageId from dealId: ${deal.pipeline_stage_id}`);
+      }
+      
+      // Step 3: Fetch stage (either from explicit stageId or auto-inferred from deal)
+      const stage = resolvedStageId ? await getPipelineStageById(resolvedStageId) : null;
+      
+      if (stage) {
+        console.log(`✅ Stage fetched: ${stage.name} (pipeline_id: ${stage.pipeline_id})`);
+      }
+      
+      // Step 4: Auto-infer boardId from stage if not explicitly provided
+      const resolvedBoardId = request.boardId || stage?.pipeline_id;
+      if (!request.boardId && stage?.pipeline_id) {
+        const source = request.stageId ? 'stageId' : 'dealId';
+        console.log(`🔄 Auto-inferred boardId from ${source}: ${stage.pipeline_id}`);
+      }
+      
+      // Step 5: Fetch pipeline (either from explicit boardId or auto-inferred from stage)
+      const pipeline = resolvedBoardId ? await getPipelineById(resolvedBoardId, request.clientId) : null;
 
       const calendarConnectionId =
-        request.calendarId || inferredPipeline?.calendar_id || undefined;
+        request.calendarId || pipeline?.calendar_id || undefined;
 
       // Validate agent and calendar
       const validation = await validateAgentHasCalendar(
