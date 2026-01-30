@@ -111,10 +111,10 @@ export interface BookCustomerAppointmentRequest {
   agentId: string // Agent UUID
   boardId?: string // Pipelines (board) UUID - used to select pipeline calendar if provided
   stageId?: string // Pipeline stage UUID - used for subject/metadata
-  dealId?: number // stage_items.id - used for subject/metadata
-  customerName: string // Will search in customer database
-  customerEmail?: string // Optional, will be fetched from customer if not provided
-  customerPhoneNumber?: string // Optional, will be fetched from customer/contact if not provided
+  dealId?: number // stage_items.id - used for subject/metadata and customer lookup via party_id
+  customerName?: string // Optional, will be fetched from dealId's party_id if dealId is provided
+  customerEmail?: string // Optional, will be fetched from dealId's party_id if dealId is provided
+  customerPhoneNumber?: string // Optional, will be fetched from dealId's party_id if dealId is provided
   subject?: string
   startDateTime: string // ISO 8601 format
   endDateTime: string // ISO 8601 format

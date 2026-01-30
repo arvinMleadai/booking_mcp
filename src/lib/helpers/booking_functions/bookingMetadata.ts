@@ -83,17 +83,37 @@ export function buildBookingSubject(params: {
   const { customerDisplayName, stageName, dealId, dealSummary, fallbackSubject } =
     params;
 
-  // Prefer stage/deal context when available
-  if (stageName || dealId || dealSummary) {
-    const parts: string[] = [];
-    if (stageName) parts.push(stageName);
-    if (dealSummary) parts.push(dealSummary);
-    else if (dealId) parts.push(`Deal #${dealId}`);
-    parts.push(customerDisplayName);
-    return parts.join(" - ");
+  // Priority 1: Use stage name as the primary subject (most important)
+  if (stageName) {
+    return stageName;
   }
 
-  return fallbackSubject || customerDisplayName || "Appointment";
+  // Priority 2: Use deal summary if available (but no stage name)
+  if (dealSummary) {
+    try {
+      // Try to parse JSON summary to get header
+      const summaryObj = typeof dealSummary === 'string' ? JSON.parse(dealSummary) : dealSummary;
+      if (summaryObj?.header) {
+        return summaryObj.header;
+      }
+    } catch {
+      // If not JSON, use as-is
+    }
+    return dealSummary;
+  }
+
+  // Priority 3: Use deal ID if available
+  if (dealId) {
+    return `Deal #${dealId}`;
+  }
+
+  // Priority 4: Use explicit subject from request
+  if (fallbackSubject) {
+    return fallbackSubject;
+  }
+
+  // Priority 5: Fallback to customer name or generic
+  return customerDisplayName || "Appointment";
 }
 
 /**
@@ -110,7 +130,11 @@ export type PartyContactInfo = {
 
 /**
  * Get customer or contact information from party_id
- * Tries customers table first, then contacts table
+ * 
+ * Flow: party_id → parties.id → parties.contacts_id → contacts.id → contact info
+ * 
+ * The parties table links to contacts via contacts_id foreign key.
+ * We need to first look up the party to get contacts_id, then fetch the contact.
  */
 export async function getPartyContactInfo(
   partyId: number,
@@ -118,53 +142,74 @@ export async function getPartyContactInfo(
 ): Promise<PartyContactInfo | null> {
   const supabase = createClient();
 
-  // First, try to find in customers table
-  const { data: customer, error: customerError } = await supabase
+  console.log(`🔍 [getPartyContactInfo] Looking up party_id: ${partyId} for client: ${clientId}`);
+
+  // Step 1: Look up the party to get contacts_id
+  const { data: party, error: partyError } = await supabase
     .schema("public")
-    .from("customers")
-    .select("id, full_name, email, phone, company")
+    .from("parties")
+    .select("id, contacts_id, role_id")
     .eq("id", partyId)
-    .eq("client_id", clientId)
+    .is("deleted_at", null)
     .maybeSingle();
 
-  if (!customerError && customer) {
-    return {
-      type: "customer",
-      id: customer.id,
-      name: customer.full_name,
-      email: customer.email || undefined,
-      phone: customer.phone || undefined,
-      company: customer.company || undefined,
-    };
+  if (partyError) {
+    console.error(`❌ [getPartyContactInfo] Error fetching party ${partyId}:`, partyError);
+    return null;
   }
 
-  // If not found in customers, try contacts table
+  if (!party) {
+    console.warn(`⚠️ [getPartyContactInfo] Party ${partyId} not found or deleted`);
+    return null;
+  }
+
+  if (!party.contacts_id) {
+    console.warn(`⚠️ [getPartyContactInfo] Party ${partyId} has no contacts_id`);
+    return null;
+  }
+
+  console.log(`✅ [getPartyContactInfo] Found party ${partyId} with contacts_id: ${party.contacts_id}`);
+
+  // Step 2: Look up the contact using contacts_id
   const { data: contact, error: contactError } = await supabase
     .schema("public")
     .from("contacts")
-    .select("id, name, first_name, last_name, email, phone_number, company")
-    .eq("id", partyId)
+    .select("id, name, first_name, last_name, email, phone_number, company, client_id")
+    .eq("id", party.contacts_id)
     .eq("client_id", clientId)
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (!contactError && contact) {
-    const name =
-      contact.name ||
-      `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
-      "Unknown";
-
-    return {
-      type: "contact",
-      id: contact.id,
-      name,
-      email: contact.email || undefined,
-      phone: contact.phone_number || undefined,
-      company: contact.company || undefined,
-    };
+  if (contactError) {
+    console.error(`❌ [getPartyContactInfo] Error fetching contact ${party.contacts_id}:`, contactError);
+    return null;
   }
 
-  return null;
+  if (!contact) {
+    console.warn(`⚠️ [getPartyContactInfo] Contact ${party.contacts_id} not found, deleted, or doesn't belong to client ${clientId}`);
+    return null;
+  }
+
+  const name =
+    contact.name ||
+    `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
+    "Unknown";
+
+  console.log(`✅ [getPartyContactInfo] Found contact ${party.contacts_id}:`, {
+    name,
+    email: contact.email || "(no email)",
+    phone: contact.phone_number || "(no phone)",
+    company: contact.company || "(no company)",
+  });
+
+  return {
+    type: "contact",
+    id: contact.id,
+    name,
+    email: contact.email || undefined,
+    phone: contact.phone_number || undefined,
+    company: contact.company || undefined,
+  };
 }
 
 

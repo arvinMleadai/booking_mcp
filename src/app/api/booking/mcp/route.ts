@@ -187,21 +187,22 @@ const handler = createMcpHandler(
             ),
           customerName: z
             .string()
+            .optional()
             .describe(
-              "Customer name to search in database: 'John Smith' (finds email and details automatically)"
+              "Customer name: 'John Smith' (optional if dealId is provided - will be fetched from deal's party_id automatically)"
             ),
           customerEmail: z
             .string()
             .email()
             .optional()
             .describe(
-              "Customer email: 'john@company.com' (optional if customer exists in database)"
+              "Customer email: 'john@company.com' (optional if dealId is provided - will be fetched from deal's party_id automatically)"
             ),
           customerPhoneNumber: z
             .string()
             .optional()
             .describe(
-              "Customer phone number: '+1234567890' (optional, will be fetched from customer/contact if not provided)"
+              "Customer phone number: '+1234567890' (optional if dealId is provided - will be fetched from deal's party_id automatically)"
             ),
           subject: z
             .string()
