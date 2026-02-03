@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+name: axios-best-practices.mdc
+description: Best practices for using Axios for HTTP requests
+globs: **/*.{ts,tsx,js,jsx}
+---
+
+- Use interceptors for handling requests and responses globally (e.g., for authentication).
+- Implement error handling for failed requests to improve user experience.
+- Use async/await syntax for cleaner asynchronous code.
+- Create a centralized API service to manage all Axios requests and configurations.
+
