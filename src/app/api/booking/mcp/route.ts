@@ -16,9 +16,13 @@ const handler = createMcpHandler(
     server.registerTool(
       "ExtractBookingIds",
       {
-        description: `Extract boardId, stageId, dealId, agentId, clientId, and timezone from booking instructions text using AI extraction.
+        description: `🚨 MANDATORY FIRST STEP: Extract boardId, stageId, dealId, agentId, clientId, and timezone from booking instructions text using AI extraction.
 
-⚠️ IMPORTANT: Use this tool FIRST before calling BookCustomerAppointment or FindAvailableBookingSlots if you cannot extract IDs directly from your instructions context.
+⚠️ CRITICAL: You MUST call this tool FIRST before calling BookCustomerAppointment or FindAvailableBookingSlots. Do NOT call booking tools without first extracting IDs using this tool.
+
+WORKFLOW:
+1. FIRST: Call ExtractBookingIds with instructionsText (the full booking instructions from your context)
+2. THEN: Use the extracted IDs when calling BookCustomerAppointment or FindAvailableBookingSlots
 
 Simply pass the instructionsText parameter with the full booking instructions section. The tool will use a powerful LLM to extract all IDs automatically.`,
         inputSchema: {
@@ -466,17 +470,16 @@ Respond ONLY with valid JSON in this exact format:
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: `Book a customer appointment with an agent. CRITICAL: You MUST extract boardId, stageId, and dealId from the booking instructions section in your context.
+        description: `Book a customer appointment with an agent.
 
-EXTRACTION STEPS:
-1. Look for the "***Booking Instructions***" section in your context
-2. Find these lines:
-   - "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → extract boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
-   - "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → extract stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
-   - "Deal id is 14588" → extract dealId=14588
-3. Pass these extracted IDs to this tool
+🚨 MANDATORY PRE-REQUISITE: You MUST call ExtractBookingIds tool FIRST to extract boardId, stageId, and dealId from your booking instructions. Do NOT call this tool without first calling ExtractBookingIds.
 
-ALTERNATIVE: If you cannot extract IDs, pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.
+REQUIRED WORKFLOW:
+1. FIRST: Call ExtractBookingIds with instructionsText (the full booking instructions from your context)
+2. Get the extracted IDs (boardId, stageId, dealId) from the response
+3. THEN: Call this tool (BookCustomerAppointment) with the extracted IDs
+
+If you call this tool without boardId, stageId, and dealId, it will fail. Always extract IDs first using ExtractBookingIds tool.
 
 Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.`,
         inputSchema: {
@@ -641,12 +644,26 @@ Automatically searches customer database, checks calendar conflicts, validates o
             }
           }
 
-          // Warn if still missing after extraction attempt
+          // Return error if IDs are still missing - force LLM to call ExtractBookingIds first
           if (!extractedBoardId || !extractedStageId || !extractedDealId) {
+            const missingIds = [];
+            if (!extractedBoardId) missingIds.push("boardId");
+            if (!extractedStageId) missingIds.push("stageId");
+            if (!extractedDealId) missingIds.push("dealId");
+
             console.warn("⚠️ Missing IDs - These should be extracted from booking instructions:");
             if (!extractedBoardId) console.warn("  - boardId not found (look for 'Board Id is' or 'Board Id:' in instructions)");
             if (!extractedStageId) console.warn("  - stageId not found (look for 'Stage Id is' or 'Stage Id:' in instructions)");
             if (!extractedDealId) console.warn("  - dealId not found (look for 'Deal id is' or 'Deal id:' in instructions)");
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\n🚨 MANDATORY: You MUST call ExtractBookingIds tool FIRST before calling this tool.\n\nCORRECT WORKFLOW:\n1. FIRST: Call ExtractBookingIds with instructionsText parameter (the full booking instructions from your context)\n2. Get the extracted IDs from the response\n3. THEN: Call this tool again with the extracted boardId, stageId, and dealId\n\nDo NOT call this tool without first extracting IDs using ExtractBookingIds tool.`,
+                },
+              ],
+            };
           }
 
           // Convert and validate clientId
@@ -830,17 +847,16 @@ Automatically searches customer database, checks calendar conflicts, validates o
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: `Find available time slots for booking with an agent. CRITICAL: You MUST extract boardId, stageId, and dealId from the booking instructions section in your context.
+        description: `Find available time slots for booking with an agent.
 
-EXTRACTION STEPS:
-1. Look for the "***Booking Instructions***" section in your context
-2. Find these lines:
-   - "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → extract boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
-   - "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → extract stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
-   - "Deal id is 14588" → extract dealId=14588
-3. Pass these extracted IDs to this tool
+🚨 MANDATORY PRE-REQUISITE: You MUST call ExtractBookingIds tool FIRST to extract boardId, stageId, and dealId from your booking instructions. Do NOT call this tool without first calling ExtractBookingIds.
 
-ALTERNATIVE: If you cannot extract IDs, pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.
+REQUIRED WORKFLOW:
+1. FIRST: Call ExtractBookingIds with instructionsText (the full booking instructions from your context)
+2. Get the extracted IDs (boardId, stageId, dealId) from the response
+3. THEN: Call this tool (FindAvailableBookingSlots) with the extracted IDs
+
+If you call this tool without boardId, stageId, and dealId, it will fail. Always extract IDs first using ExtractBookingIds tool.
 
 Checks agent's calendar and office hours to suggest optimal meeting times.`,
         inputSchema: {
@@ -960,12 +976,26 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
             }
           }
 
-          // Warn if still missing after extraction attempt
+          // Return error if IDs are still missing - force LLM to call ExtractBookingIds first
           if (!extractedBoardIdForSlots || !extractedStageIdForSlots || !extractedDealIdForSlots) {
+            const missingIds = [];
+            if (!extractedBoardIdForSlots) missingIds.push("boardId");
+            if (!extractedStageIdForSlots) missingIds.push("stageId");
+            if (!extractedDealIdForSlots) missingIds.push("dealId");
+
             console.warn("⚠️ Missing IDs - These should be extracted from booking instructions:");
             if (!extractedBoardIdForSlots) console.warn("  - boardId not found (look for 'Board Id is' or 'Board Id:' in instructions)");
             if (!extractedStageIdForSlots) console.warn("  - stageId not found (look for 'Stage Id is' or 'Stage Id:' in instructions)");
             if (!extractedDealIdForSlots) console.warn("  - dealId not found (look for 'Deal id is' or 'Deal id:' in instructions)");
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\n🚨 MANDATORY: You MUST call ExtractBookingIds tool FIRST before calling this tool.\n\nCORRECT WORKFLOW:\n1. FIRST: Call ExtractBookingIds with instructionsText parameter (the full booking instructions from your context)\n2. Get the extracted IDs from the response\n3. THEN: Call this tool again with the extracted boardId, stageId, and dealId\n\nDo NOT call this tool without first extracting IDs using ExtractBookingIds tool.`,
+                },
+              ],
+            };
           }
 
           // Convert and validate clientId
