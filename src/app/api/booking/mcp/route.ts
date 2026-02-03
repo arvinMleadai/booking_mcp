@@ -234,16 +234,17 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: `Book a customer appointment with an agent. 
+        description: `Book a customer appointment with an agent. CRITICAL: You MUST extract boardId, stageId, and dealId from the booking instructions section in your context.
 
-⚠️ CRITICAL: You MUST provide boardId, stageId, and dealId. These are in your booking instructions context.
+EXTRACTION STEPS:
+1. Look for the "***Booking Instructions***" section in your context
+2. Find these lines:
+   - "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → extract boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+   - "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → extract stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
+   - "Deal id is 14588" → extract dealId=14588
+3. Pass these extracted IDs to this tool
 
-METHOD 1 (PREFERRED): Extract IDs from your instructions context:
-- Find line "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → use boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
-- Find line "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → use stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
-- Find line "Deal id is 14588" → use dealId=14588
-
-METHOD 2 (IF EXTRACTION FAILS): Pass instructionsText parameter with the full instructions text - IDs will be extracted automatically. This is REQUIRED if you cannot extract IDs manually.
+ALTERNATIVE: If you cannot extract IDs, pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.
 
 Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.`,
         inputSchema: {
@@ -261,20 +262,20 @@ Automatically searches customer database, checks calendar conflicts, validates o
             .uuid()
             .optional()
             .describe(
-              "⚠️ REQUIRED: Pipeline/board UUID from booking instructions. Extract from line 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' → copy the UUID part. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. If missing, pass instructionsText parameter instead."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline/board UUID. MUST extract from booking instructions if present. Look for: 'Board Id:', 'Board ID:', 'boardId', 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Uses pipeline's calendar when agent has no calendar. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "⚠️ REQUIRED: Pipeline stage UUID from booking instructions. Extract from line 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' → copy the UUID part. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. If missing, pass instructionsText parameter instead."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline stage UUID. MUST extract from booking instructions if present. Look for: 'Stage Id:', 'Stage ID:', 'stageId', 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. Used to generate appointment subject. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "⚠️ REQUIRED: Deal ID from booking instructions. Extract from line 'Deal id is 14588' → copy the number part. Format: number. Example: 14588. If missing, pass instructionsText parameter instead."
+              "REQUIRED IF IN INSTRUCTIONS: Deal ID (stage_items.id). MUST extract from booking instructions if present. Look for: 'Deal id:', 'Deal ID:', 'dealId', 'Deal id: 14588'. Format: number. Example: 14588 or '14588'. Automatically fetches customer name/email/phone from deal database. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           customerName: z
             .string()
@@ -408,26 +409,12 @@ Automatically searches customer database, checks calendar conflicts, validates o
             }
           }
 
-          // Return error if IDs are still missing and instructionsText was not provided
-          if ((!extractedBoardId || !extractedStageId || !extractedDealId) && !instructionsText) {
-            const missingIds = [];
-            if (!extractedBoardId) missingIds.push("boardId");
-            if (!extractedStageId) missingIds.push("stageId");
-            if (!extractedDealId) missingIds.push("dealId");
-
+          // Warn if still missing after extraction attempt
+          if (!extractedBoardId || !extractedStageId || !extractedDealId) {
             console.warn("⚠️ Missing IDs - These should be extracted from booking instructions:");
             if (!extractedBoardId) console.warn("  - boardId not found (look for 'Board Id is' or 'Board Id:' in instructions)");
             if (!extractedStageId) console.warn("  - stageId not found (look for 'Stage Id is' or 'Stage Id:' in instructions)");
             if (!extractedDealId) console.warn("  - dealId not found (look for 'Deal id is' or 'Deal id:' in instructions)");
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\nThese IDs are required for booking but were not provided.\n\nTO FIX:\n1. Extract IDs from your booking instructions context:\n   - Find "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → use boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'\n   - Find "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → use stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'\n   - Find "Deal id is 14588" → use dealId=14588\n\n2. OR pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.\n\n3. OR call ExtractBookingIds tool FIRST with your instructions text, then use the returned IDs.`,
-                },
-              ],
-            };
           }
 
           // Convert and validate clientId
@@ -611,16 +598,17 @@ Automatically searches customer database, checks calendar conflicts, validates o
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: `Find available time slots for booking with an agent.
+        description: `Find available time slots for booking with an agent. CRITICAL: You MUST extract boardId, stageId, and dealId from the booking instructions section in your context.
 
-⚠️ CRITICAL: You MUST provide boardId, stageId, and dealId. These are in your booking instructions context.
+EXTRACTION STEPS:
+1. Look for the "***Booking Instructions***" section in your context
+2. Find these lines:
+   - "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → extract boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+   - "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → extract stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
+   - "Deal id is 14588" → extract dealId=14588
+3. Pass these extracted IDs to this tool
 
-METHOD 1 (PREFERRED): Extract IDs from your instructions context:
-- Find line "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → use boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
-- Find line "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → use stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
-- Find line "Deal id is 14588" → use dealId=14588
-
-METHOD 2 (IF EXTRACTION FAILS): Pass instructionsText parameter with the full instructions text - IDs will be extracted automatically. This is REQUIRED if you cannot extract IDs manually.
+ALTERNATIVE: If you cannot extract IDs, pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.
 
 Checks agent's calendar and office hours to suggest optimal meeting times.`,
         inputSchema: {
@@ -636,20 +624,20 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
             .uuid()
             .optional()
             .describe(
-              "⚠️ REQUIRED: Pipeline/board UUID from booking instructions. Extract from line 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' → copy the UUID part. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. If missing, pass instructionsText parameter instead."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline/board UUID. MUST extract from booking instructions if present. Look for: 'Board Id:', 'Board ID:', 'boardId', 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Uses pipeline's calendar when agent has no calendar. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "⚠️ REQUIRED: Pipeline stage UUID from booking instructions. Extract from line 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' → copy the UUID part. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. If missing, pass instructionsText parameter instead."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline stage UUID. MUST extract from booking instructions if present. Look for: 'Stage Id:', 'Stage ID:', 'stageId', 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. Used for calendar selection. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "⚠️ REQUIRED: Deal ID from booking instructions. Extract from line 'Deal id is 14588' → copy the number part. Format: number. Example: 14588. If missing, pass instructionsText parameter instead."
+              "REQUIRED IF IN INSTRUCTIONS: Deal ID (stage_items.id). MUST extract from booking instructions if present. Look for: 'Deal id:', 'Deal ID:', 'dealId', 'Deal id: 14588'. Format: number. Example: 14588 or '14588'. Automatically fetches customer details. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           preferredDate: z
             .string()
@@ -678,7 +666,7 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
             .string()
             .optional()
             .describe(
-              "⚠️ REQUIRED IF boardId/stageId/dealId ARE MISSING: Pass the full booking instructions text here. The system will automatically extract boardId, stageId, and dealId from it. Look for the section starting with '#***Booking Instructions***' in your context and pass that entire section. Example format: 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588'"
+              "OPTIONAL: If boardId/stageId/dealId are missing, pass the booking instructions text here and they will be extracted automatically. Look for lines like 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a'."
             ),
         },
       },

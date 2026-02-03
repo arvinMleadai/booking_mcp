@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+name: supabase-best-practices.mdc
+description: Best practices for using Supabase as a backend
+globs: **/*.{ts,tsx}
+---
+
+- Use Supabase's built-in authentication for secure user management.
+- Leverage real-time subscriptions for live data updates in your application.
+- Structure your database schema to optimize for performance and scalability.
+- Implement row-level security policies to protect sensitive data.
+

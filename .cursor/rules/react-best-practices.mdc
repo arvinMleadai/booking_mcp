@@ -1,0 +1,12 @@
+name: react-best-practices.mdc
+description: Best practices for React applications
+globs: **/*.{ts,tsx,js,jsx}
+
+---
+alwaysApply: true
+---
+
+- Use functional components and hooks for cleaner and more maintainable code.
+- Implement PropTypes or TypeScript for type checking and better documentation.
+- Use React.memo and useCallback to optimize performance by preventing unnecessary re-renders.
+- Structure components in a way that promotes reusability and separation of concerns.
