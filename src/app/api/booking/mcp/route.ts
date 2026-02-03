@@ -55,8 +55,8 @@ Simply pass the instructionsText parameter with the full booking instructions se
             ? 'https://api.groq.com/openai/v1/chat/completions'
             : 'https://api.openai.com/v1/chat/completions';
           const model = groqApiKey 
-            ? 'llama-3.1-70b-versatile' // Groq model
-            : 'gpt-4o-mini'; // OpenAI model
+            ? (process.env.GROQ_MODEL || 'llama-3.1-8b-instant') // Groq model (configurable via GROQ_MODEL env var)
+            : (process.env.OPENAI_MODEL || 'gpt-4o-mini'); // OpenAI model (configurable via OPENAI_MODEL env var)
 
           if (!apiKey) {
             console.error("❌ No API key found. Set GROQ_API_KEY or OPENAI_API_KEY environment variable.");
