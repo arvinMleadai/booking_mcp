@@ -104,25 +104,35 @@ Simply pass the instructionsText parameter with the full booking instructions se
             messages: [
               {
                 role: 'system',
-                content: `Extract booking IDs from the provided instructions text. Look for these specific patterns and extract the values:
+                content: `You are an expert at extracting booking IDs from instructions text. Extract ALL IDs that are present in the instructions.
 
-REQUIRED IDs to extract:
+CRITICAL IDs to extract (REQUIRED if present):
 - boardId: Look for "Board Id is <UUID>" or "Board Id: <UUID>" → extract the UUID (36 characters with hyphens)
 - stageId: Look for "Stage Id is <UUID>" or "Stage Id: <UUID>" → extract the UUID (36 characters with hyphens)
 - dealId: Look for "Deal id is <number>" or "Deal id: <number>" → extract the number
 
-OPTIONAL IDs to extract:
-- agentId: Look for "Agent ID is <UUID>" or "Agent ID: <UUID>" → extract the UUID
-- clientId: Look for "Client ID is <number>" or "Client ID: <number>" → extract the number
-- timezone: Look for "Timezone is <timezone>" or "Timezone: <timezone>" → extract the timezone string (IANA format)
+IMPORTANT IDs to extract (ALSO REQUIRED if present):
+- agentId: Look for "Agent ID is <UUID>" or "Agent ID: <UUID>" or "Agent Id is <UUID>" → extract the UUID
+- clientId: Look for "Client ID is <number>" or "Client ID: <number>" or "Client Id is <number>" → extract the number
+- timezone: Look for "Timezone is <timezone>" or "Timezone: <timezone>" or "timezone is <timezone>" → extract the timezone string (IANA format like "Africa/Casablanca")
 
-Rules:
-- UUIDs must be exactly 36 characters with hyphens (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-- Numbers should be extracted as integers
-- If a value is not found, use null or omit it
-- Be precise and extract exactly what follows "is" or ":" after the label
+Extraction Rules:
+1. UUIDs must be exactly 36 characters with hyphens (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+2. Numbers should be extracted as integers (no decimals)
+3. Timezone should be in IANA format (e.g., "Africa/Casablanca", "America/New_York")
+4. Extract EXACTLY what follows "is" or ":" after the label - do not modify or truncate
+5. If a value is not found in the instructions, use null (not undefined, not empty string)
+6. Be thorough - these IDs are critical for booking operations
 
-Respond ONLY with valid JSON in this exact format:
+Example patterns to look for:
+- "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142"
+- "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a"
+- "Deal id is 14588"
+- "Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2"
+- "Client ID is 10000002"
+- "Timezone is Africa/Casablanca"
+
+Respond ONLY with valid JSON in this exact format (use null for missing values):
 {
   "boardId": "uuid-string or null",
   "stageId": "uuid-string or null",
@@ -134,7 +144,7 @@ Respond ONLY with valid JSON in this exact format:
               },
               {
                 role: 'user',
-                content: `Extract booking IDs from these instructions:\n\n${instructionsText}`
+                content: `Extract ALL booking IDs from these instructions. Be thorough and extract every ID that is present:\n\n${instructionsText}`
               }
             ],
             response_format: {
@@ -248,29 +258,49 @@ Respond ONLY with valid JSON in this exact format:
             extractedJson.agentId = null;
           }
 
-          // Build success response
+          // Build success response with clear format for LLM to parse
           let responseText = `✅ EXTRACTED BOOKING IDs\n\n`;
+          
+          const extractedIds: Record<string, any> = {};
           
           if (extractedJson.boardId && extractedJson.boardId !== 'null') {
             responseText += `boardId: ${extractedJson.boardId}\n`;
+            extractedIds.boardId = extractedJson.boardId;
           }
           if (extractedJson.stageId && extractedJson.stageId !== 'null') {
             responseText += `stageId: ${extractedJson.stageId}\n`;
+            extractedIds.stageId = extractedJson.stageId;
           }
           if (extractedJson.dealId && extractedJson.dealId !== null && extractedJson.dealId !== 'null') {
             responseText += `dealId: ${extractedJson.dealId}\n`;
+            extractedIds.dealId = extractedJson.dealId;
           }
           if (extractedJson.agentId && extractedJson.agentId !== 'null') {
             responseText += `agentId: ${extractedJson.agentId}\n`;
+            extractedIds.agentId = extractedJson.agentId;
           }
           if (extractedJson.clientId && extractedJson.clientId !== null && extractedJson.clientId !== 'null') {
             responseText += `clientId: ${extractedJson.clientId}\n`;
+            extractedIds.clientId = extractedJson.clientId;
           }
           if (extractedJson.timezone && extractedJson.timezone !== 'null') {
             responseText += `timezone: ${extractedJson.timezone}\n`;
+            extractedIds.timezone = extractedJson.timezone;
           }
 
-          responseText += `\n✅ Use these extracted IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+          responseText += `\n📋 COPY THESE VALUES EXACTLY when calling BookCustomerAppointment or FindAvailableBookingSlots:\n`;
+          responseText += `- Pass boardId="${extractedIds.boardId || 'MISSING'}"\n`;
+          responseText += `- Pass stageId="${extractedIds.stageId || 'MISSING'}"\n`;
+          responseText += `- Pass dealId=${extractedIds.dealId || 'MISSING'}\n`;
+          if (extractedIds.agentId) {
+            responseText += `- Pass agentId="${extractedIds.agentId}"\n`;
+          }
+          if (extractedIds.clientId) {
+            responseText += `- Pass clientId=${extractedIds.clientId}\n`;
+          }
+          if (extractedIds.timezone) {
+            responseText += `- Note: timezone="${extractedIds.timezone}"\n`;
+          }
 
           console.log("✅ Successfully extracted IDs via LLM:", extractedJson);
 
@@ -617,9 +647,11 @@ Automatically searches customer database, checks calendar conflicts, validates o
           let extractedBoardId = boardId;
           let extractedStageId = stageId;
           let extractedDealId = dealId;
+          let extractedAgentId = agentId;
+          let extractedClientId = clientId;
 
-          if (instructionsText && (!boardId || !stageId || !dealId)) {
-            console.log("🔍 Extracting missing IDs from provided instructions text...");
+          if (instructionsText && (!boardId || !stageId || !dealId || !agentId || !clientId)) {
+            console.log("🔍 Extracting missing IDs from provided instructions text using regex fallback...");
             try {
               const extracted = extractBookingIds(instructionsText);
               
@@ -637,6 +669,16 @@ Automatically searches customer database, checks calendar conflicts, validates o
                   console.log(`✅ Extracted dealId from instructions: ${extractedDealId}`);
                 } else {
                   extractedDealId = dealId; // Reset if parsing failed
+                }
+              }
+              if (!extractedAgentId && extracted.agentId) {
+                extractedAgentId = extracted.agentId;
+                console.log(`✅ Extracted agentId from instructions: ${extractedAgentId}`);
+              }
+              if (!extractedClientId && extracted.clientId) {
+                extractedClientId = typeof extracted.clientId === 'number' ? extracted.clientId : parseInt(String(extracted.clientId), 10);
+                if (!isNaN(extractedClientId)) {
+                  console.log(`✅ Extracted clientId from instructions: ${extractedClientId}`);
                 }
               }
             } catch (error) {
@@ -666,16 +708,17 @@ Automatically searches customer database, checks calendar conflicts, validates o
             };
           }
 
-          // Convert and validate clientId
+          // Convert and validate clientId (use extracted if original was missing)
+          const clientIdToUse = extractedClientId !== undefined && extractedClientId !== null ? extractedClientId : clientId;
           const numericClientId =
-            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+            typeof clientIdToUse === "string" ? parseInt(clientIdToUse, 10) : clientIdToUse;
 
           if (!numericClientId || isNaN(numericClientId)) {
             return {
               content: [
                 {
                   type: "text",
-                  text: "Error: clientId is required and must be a valid number",
+                  text: "Error: clientId is required and must be a valid number. Make sure to extract clientId from booking instructions using ExtractBookingIds tool first.",
                 },
               ],
             };
@@ -721,11 +764,11 @@ Automatically searches customer database, checks calendar conflicts, validates o
           }
 
           const request: BookCustomerAppointmentRequest = {
-            clientId: numericClientId,
-            agentId,
-            boardId: normalizedBoardId,
-            stageId: normalizedStageId,
-            dealId: numericDealId,
+            clientId: extractedClientId || numericClientId,
+            agentId: extractedAgentId || agentId, // Use extracted agentId if available
+            boardId: extractedBoardId || normalizedBoardId,
+            stageId: extractedStageId || normalizedStageId,
+            dealId: extractedDealId || numericDealId,
             customerName,
             customerEmail,
             customerPhoneNumber,
@@ -950,9 +993,11 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
           let extractedBoardIdForSlots = boardId;
           let extractedStageIdForSlots = stageId;
           let extractedDealIdForSlots = dealId;
+          let extractedAgentIdForSlots = agentId;
+          let extractedClientIdForSlots = clientId;
 
-          if (instructionsText && (!boardId || !stageId || !dealId)) {
-            console.log("🔍 Extracting missing IDs from provided instructions text...");
+          if (instructionsText && (!boardId || !stageId || !dealId || !agentId || !clientId)) {
+            console.log("🔍 Extracting missing IDs from provided instructions text using regex fallback...");
             try {
               const extracted = extractBookingIds(instructionsText);
               
@@ -969,6 +1014,17 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
                 if (!isNaN(parsed)) {
                   extractedDealIdForSlots = parsed;
                   console.log(`✅ Extracted dealId from instructions: ${extractedDealIdForSlots}`);
+                }
+              }
+              if (!extractedAgentIdForSlots && extracted.agentId) {
+                extractedAgentIdForSlots = extracted.agentId;
+                console.log(`✅ Extracted agentId from instructions: ${extractedAgentIdForSlots}`);
+              }
+              if (!extractedClientIdForSlots && extracted.clientId) {
+                const parsed = typeof extracted.clientId === 'number' ? extracted.clientId : parseInt(String(extracted.clientId), 10);
+                if (!isNaN(parsed)) {
+                  extractedClientIdForSlots = parsed;
+                  console.log(`✅ Extracted clientId from instructions: ${extractedClientIdForSlots}`);
                 }
               }
             } catch (error) {
@@ -998,16 +1054,17 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
             };
           }
 
-          // Convert and validate clientId
+          // Convert and validate clientId (use extracted if original was missing)
+          const clientIdToUseForSlots = extractedClientIdForSlots !== undefined && extractedClientIdForSlots !== null ? extractedClientIdForSlots : clientId;
           const numericClientId =
-            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+            typeof clientIdToUseForSlots === "string" ? parseInt(clientIdToUseForSlots, 10) : clientIdToUseForSlots;
 
           if (!numericClientId || isNaN(numericClientId)) {
             return {
               content: [
                 {
                   type: "text",
-                  text: "Error: clientId is required and must be a valid number",
+                  text: "Error: clientId is required and must be a valid number. Make sure to extract clientId from booking instructions using ExtractBookingIds tool first.",
                 },
               ],
             };
@@ -1055,7 +1112,7 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
 
           const request: FindBookingSlotsRequest = {
             clientId: numericClientId,
-            agentId,
+            agentId: extractedAgentIdForSlots || agentId, // Use extracted agentId if available
             boardId: normalizedBoardIdForSlots,
             stageId: normalizedStageIdForSlots,
             dealId: numericDealIdForSlots,
