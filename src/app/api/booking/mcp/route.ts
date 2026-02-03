@@ -12,6 +12,85 @@ import type {
 
 const handler = createMcpHandler(
   (server) => {
+    // ExtractBookingIds - Helper tool to extract IDs from booking instructions
+    server.registerTool(
+      "ExtractBookingIds",
+      {
+        description: "Extract boardId, stageId, dealId, agentId, clientId, and timezone from booking instructions text. Use this tool FIRST if you need to extract IDs from instructions before calling booking tools. The instructions usually contain lines like 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Deal id is 14588'.",
+        inputSchema: {
+          instructionsText: z
+            .string()
+            .describe(
+              "The booking instructions text containing IDs. Look for patterns like 'Board Id is ...', 'Stage Id is ...', 'Deal id is ...', 'Agent ID is ...', 'Client ID is ...', 'Timezone is ...'"
+            ),
+        },
+      },
+      async (args) => {
+        try {
+          const { instructionsText } = args;
+
+          console.log("🔍 Extracting booking IDs from instructions...");
+
+          const extracted = extractBookingIds(instructionsText);
+
+          if (!extracted.boardId && !extracted.stageId && !extracted.dealId) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `NO IDs FOUND\n\nCould not extract boardId, stageId, or dealId from the instructions.\n\nMake sure the instructions contain lines like:\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588`,
+                },
+              ],
+            };
+          }
+
+          let responseText = `EXTRACTED BOOKING IDs\n\n`;
+          
+          if (extracted.boardId) {
+            responseText += `boardId: ${extracted.boardId}\n`;
+          }
+          if (extracted.stageId) {
+            responseText += `stageId: ${extracted.stageId}\n`;
+          }
+          if (extracted.dealId) {
+            responseText += `dealId: ${extracted.dealId}\n`;
+          }
+          if (extracted.agentId) {
+            responseText += `agentId: ${extracted.agentId}\n`;
+          }
+          if (extracted.clientId) {
+            responseText += `clientId: ${extracted.clientId}\n`;
+          }
+          if (extracted.timezone) {
+            responseText += `timezone: ${extracted.timezone}\n`;
+          }
+
+          responseText += `\nUse these IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("Error in ExtractBookingIds:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error extracting IDs: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
     // ListAgents - List all agents with calendar assignments
     server.registerTool(
       "ListAgents",
@@ -155,16 +234,17 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: `Book a customer appointment with an agent. REQUIRED: Extract boardId, stageId, and dealId from booking instructions and include them.
+        description: `Book a customer appointment with an agent. CRITICAL: You MUST extract boardId, stageId, and dealId from the booking instructions section in your context.
 
-EXTRACTION METHODS (use one):
-1. Extract IDs yourself and pass: boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142', stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a', dealId=14588
-2. If extraction fails, pass instructionsText parameter with the full instructions text - IDs will be extracted automatically.
+EXTRACTION STEPS:
+1. Look for the "***Booking Instructions***" section in your context
+2. Find these lines:
+   - "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → extract boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+   - "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → extract stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
+   - "Deal id is 14588" → extract dealId=14588
+3. Pass these extracted IDs to this tool
 
-Look for these patterns in instructions:
-- 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
-- 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' or 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'
-- 'Deal id is 14588' or 'Deal id: 14588'
+ALTERNATIVE: If you cannot extract IDs, pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.
 
 Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.`,
         inputSchema: {
@@ -276,8 +356,10 @@ Automatically searches customer database, checks calendar conflicts, validates o
             location,
             isOnlineMeeting,
             calendarId,
-            instructionsText,
           } = args;
+          
+          // Access instructionsText safely (it's optional in the schema)
+          const instructionsText = 'instructionsText' in args ? (args as any).instructionsText : undefined;
 
           console.log("book customer appointment (Booking MCP)");
           console.table(args);
@@ -309,8 +391,12 @@ Automatically searches customer database, checks calendar conflicts, validates o
                 console.log(`✅ Extracted stageId from instructions: ${extractedStageId}`);
               }
               if (!extractedDealId && extracted.dealId) {
-                extractedDealId = extracted.dealId;
-                console.log(`✅ Extracted dealId from instructions: ${extractedDealId}`);
+                extractedDealId = typeof extracted.dealId === 'number' ? extracted.dealId : parseInt(String(extracted.dealId), 10);
+                if (!isNaN(extractedDealId)) {
+                  console.log(`✅ Extracted dealId from instructions: ${extractedDealId}`);
+                } else {
+                  extractedDealId = dealId; // Reset if parsing failed
+                }
               }
             } catch (error) {
               console.warn("⚠️ Failed to extract IDs from instructions text:", error);
@@ -506,16 +592,17 @@ Automatically searches customer database, checks calendar conflicts, validates o
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: `Find available time slots for booking with an agent. REQUIRED: Extract boardId, stageId, and dealId from booking instructions and include them.
+        description: `Find available time slots for booking with an agent. CRITICAL: You MUST extract boardId, stageId, and dealId from the booking instructions section in your context.
 
-EXTRACTION METHODS (use one):
-1. Extract IDs yourself and pass: boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142', stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a', dealId=14588
-2. If extraction fails, pass instructionsText parameter with the full instructions text - IDs will be extracted automatically.
+EXTRACTION STEPS:
+1. Look for the "***Booking Instructions***" section in your context
+2. Find these lines:
+   - "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → extract boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+   - "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → extract stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
+   - "Deal id is 14588" → extract dealId=14588
+3. Pass these extracted IDs to this tool
 
-Look for these patterns in instructions:
-- 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
-- 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' or 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'
-- 'Deal id is 14588' or 'Deal id: 14588'
+ALTERNATIVE: If you cannot extract IDs, pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.
 
 Checks agent's calendar and office hours to suggest optimal meeting times.`,
         inputSchema: {
@@ -589,8 +676,10 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
             durationMinutes,
             maxSuggestions,
             calendarId,
-            instructionsText,
           } = args;
+          
+          // Access instructionsText safely (it's optional in the schema)
+          const instructionsText = 'instructionsText' in args ? (args as any).instructionsText : undefined;
 
           console.log("find available booking slots (Booking MCP)");
           console.table(args);
@@ -622,8 +711,11 @@ Checks agent's calendar and office hours to suggest optimal meeting times.`,
                 console.log(`✅ Extracted stageId from instructions: ${extractedStageIdForSlots}`);
               }
               if (!extractedDealIdForSlots && extracted.dealId) {
-                extractedDealIdForSlots = extracted.dealId;
-                console.log(`✅ Extracted dealId from instructions: ${extractedDealIdForSlots}`);
+                const parsed = typeof extracted.dealId === 'number' ? extracted.dealId : parseInt(String(extracted.dealId), 10);
+                if (!isNaN(parsed)) {
+                  extractedDealIdForSlots = parsed;
+                  console.log(`✅ Extracted dealId from instructions: ${extractedDealIdForSlots}`);
+                }
               }
             } catch (error) {
               console.warn("⚠️ Failed to extract IDs from instructions text:", error);
