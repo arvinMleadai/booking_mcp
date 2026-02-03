@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import { BookingOperations } from "@/lib/helpers/booking_functions";
+import { extractBookingIds } from "@/lib/helpers/toon-instructions";
 import type {
   BookCustomerAppointmentRequest,
   FindBookingSlotsRequest,
@@ -11,6 +12,85 @@ import type {
 
 const handler = createMcpHandler(
   (server) => {
+    // ExtractBookingIds - Helper tool to extract IDs from booking instructions
+    server.registerTool(
+      "ExtractBookingIds",
+      {
+        description: "Extract boardId, stageId, dealId, agentId, clientId, and timezone from booking instructions text. Use this tool FIRST if you need to extract IDs from instructions before calling booking tools. The instructions usually contain lines like 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Deal id is 14588'.",
+        inputSchema: {
+          instructionsText: z
+            .string()
+            .describe(
+              "The booking instructions text containing IDs. Look for patterns like 'Board Id is ...', 'Stage Id is ...', 'Deal id is ...', 'Agent ID is ...', 'Client ID is ...', 'Timezone is ...'"
+            ),
+        },
+      },
+      async (args) => {
+        try {
+          const { instructionsText } = args;
+
+          console.log("🔍 Extracting booking IDs from instructions...");
+
+          const extracted = extractBookingIds(instructionsText);
+
+          if (!extracted.boardId && !extracted.stageId && !extracted.dealId) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `NO IDs FOUND\n\nCould not extract boardId, stageId, or dealId from the instructions.\n\nMake sure the instructions contain lines like:\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588`,
+                },
+              ],
+            };
+          }
+
+          let responseText = `EXTRACTED BOOKING IDs\n\n`;
+          
+          if (extracted.boardId) {
+            responseText += `boardId: ${extracted.boardId}\n`;
+          }
+          if (extracted.stageId) {
+            responseText += `stageId: ${extracted.stageId}\n`;
+          }
+          if (extracted.dealId) {
+            responseText += `dealId: ${extracted.dealId}\n`;
+          }
+          if (extracted.agentId) {
+            responseText += `agentId: ${extracted.agentId}\n`;
+          }
+          if (extracted.clientId) {
+            responseText += `clientId: ${extracted.clientId}\n`;
+          }
+          if (extracted.timezone) {
+            responseText += `timezone: ${extracted.timezone}\n`;
+          }
+
+          responseText += `\nUse these IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("Error in ExtractBookingIds:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error extracting IDs: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
     // ListAgents - List all agents with calendar assignments
     server.registerTool(
       "ListAgents",
@@ -154,7 +234,18 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars. CRITICAL: Extract and pass boardId, stageId, and dealId if they appear ANYWHERE in the booking instructions, prompt, or context (e.g., '**Board ID:** `xxx`', '**Stage ID:** `xxx`', '**Deal ID:** `xxx`'). The dealId automatically fetches customer name, email, and phone from the database.",
+        description: `Book a customer appointment with an agent. 
+
+⚠️ CRITICAL: You MUST provide boardId, stageId, and dealId. These are in your booking instructions context.
+
+METHOD 1 (PREFERRED): Extract IDs from your instructions context:
+- Find line "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → use boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+- Find line "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → use stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
+- Find line "Deal id is 14588" → use dealId=14588
+
+METHOD 2 (IF EXTRACTION FAILS): Pass instructionsText parameter with the full instructions text - IDs will be extracted automatically. This is REQUIRED if you cannot extract IDs manually.
+
+Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -170,20 +261,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID - EXTRACT from booking instructions if present (look for 'Board ID:', 'BoardID:', or similar). Example: '5898f07d-2473-4a1f-892a-ea5bc1203576'. Uses the pipeline's assigned calendar connection for booking when agent has no calendar."
+              "⚠️ REQUIRED: Pipeline/board UUID from booking instructions. Extract from line 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' → copy the UUID part. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. If missing, pass instructionsText parameter instead."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID - EXTRACT from booking instructions if present (look for 'Stage ID:', 'StageID:', or similar). Example: 'c174444a-e0d3-49c2-b76f-6e407ea2af71'. Used to generate the appointment subject (e.g., 'Discovery Call / Pre-Demo')."
+              "⚠️ REQUIRED: Pipeline stage UUID from booking instructions. Extract from line 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' → copy the UUID part. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. If missing, pass instructionsText parameter instead."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id) - EXTRACT from booking instructions if present (look for 'Deal ID:', 'DealID:', or similar). Example: 6819 or '6819'. Automatically fetches customer name/email/phone from the deal database and generates better appointment subjects."
+              "⚠️ REQUIRED: Deal ID from booking instructions. Extract from line 'Deal id is 14588' → copy the number part. Format: number. Example: 14588. If missing, pass instructionsText parameter instead."
             ),
           customerName: z
             .string()
@@ -244,6 +335,12 @@ const handler = createMcpHandler(
             .describe(
               "Calendar connection ID override (optional). Uses this calendar connection instead of the agent/pipeline selection."
             ),
+          instructionsText: z
+            .string()
+            .optional()
+            .describe(
+              "⚠️ REQUIRED IF boardId/stageId/dealId ARE MISSING: Pass the full booking instructions text here. The system will automatically extract boardId, stageId, and dealId from it. Look for the section starting with '#***Booking Instructions***' in your context and pass that entire section. Example format: 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588'"
+            ),
         },
       },
       async (args) => {
@@ -265,6 +362,9 @@ const handler = createMcpHandler(
             isOnlineMeeting,
             calendarId,
           } = args;
+          
+          // Access instructionsText safely (it's optional in the schema)
+          const instructionsText = 'instructionsText' in args ? (args as any).instructionsText : undefined;
 
           console.log("book customer appointment (Booking MCP)");
           console.table(args);
@@ -276,6 +376,59 @@ const handler = createMcpHandler(
             stageIdType: typeof args.stageId,
             dealIdType: typeof args.dealId,
           });
+
+          // Fallback: Extract IDs from instructionsText if provided and IDs are missing
+          let extractedBoardId = boardId;
+          let extractedStageId = stageId;
+          let extractedDealId = dealId;
+
+          if (instructionsText && (!boardId || !stageId || !dealId)) {
+            console.log("🔍 Extracting missing IDs from provided instructions text...");
+            try {
+              const extracted = extractBookingIds(instructionsText);
+              
+              if (!extractedBoardId && extracted.boardId) {
+                extractedBoardId = extracted.boardId;
+                console.log(`✅ Extracted boardId from instructions: ${extractedBoardId}`);
+              }
+              if (!extractedStageId && extracted.stageId) {
+                extractedStageId = extracted.stageId;
+                console.log(`✅ Extracted stageId from instructions: ${extractedStageId}`);
+              }
+              if (!extractedDealId && extracted.dealId) {
+                extractedDealId = typeof extracted.dealId === 'number' ? extracted.dealId : parseInt(String(extracted.dealId), 10);
+                if (!isNaN(extractedDealId)) {
+                  console.log(`✅ Extracted dealId from instructions: ${extractedDealId}`);
+                } else {
+                  extractedDealId = dealId; // Reset if parsing failed
+                }
+              }
+            } catch (error) {
+              console.warn("⚠️ Failed to extract IDs from instructions text:", error);
+            }
+          }
+
+          // Return error if IDs are still missing and instructionsText was not provided
+          if ((!extractedBoardId || !extractedStageId || !extractedDealId) && !instructionsText) {
+            const missingIds = [];
+            if (!extractedBoardId) missingIds.push("boardId");
+            if (!extractedStageId) missingIds.push("stageId");
+            if (!extractedDealId) missingIds.push("dealId");
+
+            console.warn("⚠️ Missing IDs - These should be extracted from booking instructions:");
+            if (!extractedBoardId) console.warn("  - boardId not found (look for 'Board Id is' or 'Board Id:' in instructions)");
+            if (!extractedStageId) console.warn("  - stageId not found (look for 'Stage Id is' or 'Stage Id:' in instructions)");
+            if (!extractedDealId) console.warn("  - dealId not found (look for 'Deal id is' or 'Deal id:' in instructions)");
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\nThese IDs are required for booking but were not provided.\n\nTO FIX:\n1. Extract IDs from your booking instructions context:\n   - Find "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → use boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'\n   - Find "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → use stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'\n   - Find "Deal id is 14588" → use dealId=14588\n\n2. OR pass the instructionsText parameter with the full booking instructions text - IDs will be extracted automatically.\n\n3. OR call ExtractBookingIds tool FIRST with your instructions text, then use the returned IDs.`,
+                },
+              ],
+            };
+          }
 
           // Convert and validate clientId
           const numericClientId =
@@ -293,8 +446,10 @@ const handler = createMcpHandler(
           }
 
           // Convert dealId to number if it's a string
-          const numericDealId = dealId !== undefined 
-            ? (typeof dealId === "number" ? dealId : (typeof dealId === "string" ? parseInt(dealId, 10) : undefined))
+          // Use extracted value if original was missing
+          const dealIdToUse = extractedDealId !== undefined && extractedDealId !== null ? extractedDealId : dealId;
+          const numericDealId = dealIdToUse !== undefined 
+            ? (typeof dealIdToUse === "number" ? dealIdToUse : (typeof dealIdToUse === "string" ? parseInt(dealIdToUse, 10) : undefined))
             : undefined;
 
           // Validate dealId is a valid number if provided
@@ -310,17 +465,20 @@ const handler = createMcpHandler(
           }
 
           // Normalize boardId and stageId (handle empty strings, null, etc.)
+          // Use extracted values if original was missing
           let normalizedBoardId: string | undefined = undefined;
-          if (boardId && typeof boardId === "string") {
-            const trimmed = boardId.trim();
+          const boardIdToUse = extractedBoardId || boardId;
+          if (boardIdToUse && typeof boardIdToUse === "string") {
+            const trimmed = boardIdToUse.trim();
             if (trimmed !== "") {
               normalizedBoardId = trimmed;
             }
           }
 
           let normalizedStageId: string | undefined = undefined;
-          if (stageId && typeof stageId === "string") {
-            const trimmed = stageId.trim();
+          const stageIdToUse = extractedStageId || stageId;
+          if (stageIdToUse && typeof stageIdToUse === "string") {
+            const trimmed = stageIdToUse.trim();
             if (trimmed !== "") {
               normalizedStageId = trimmed;
             }
@@ -453,7 +611,18 @@ const handler = createMcpHandler(
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times. CRITICAL: Extract and pass boardId, stageId, and dealId if they appear ANYWHERE in the booking instructions, prompt, or context (e.g., '**Board ID:** `xxx`', '**Stage ID:** `xxx`', '**Deal ID:** `xxx`'). These IDs enable pipeline-specific calendar selection and customer lookup.",
+        description: `Find available time slots for booking with an agent.
+
+⚠️ CRITICAL: You MUST provide boardId, stageId, and dealId. These are in your booking instructions context.
+
+METHOD 1 (PREFERRED): Extract IDs from your instructions context:
+- Find line "Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142" → use boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+- Find line "Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a" → use stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a'
+- Find line "Deal id is 14588" → use dealId=14588
+
+METHOD 2 (IF EXTRACTION FAILS): Pass instructionsText parameter with the full instructions text - IDs will be extracted automatically. This is REQUIRED if you cannot extract IDs manually.
+
+Checks agent's calendar and office hours to suggest optimal meeting times.`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -467,20 +636,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID - EXTRACT from booking instructions if present (look for 'Board ID:', 'BoardID:', or similar). Example: '5898f07d-2473-4a1f-892a-ea5bc1203576'. Uses the pipeline's assigned calendar connection when agent has no calendar."
+              "⚠️ REQUIRED: Pipeline/board UUID from booking instructions. Extract from line 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' → copy the UUID part. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. If missing, pass instructionsText parameter instead."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID - EXTRACT from booking instructions if present (look for 'Stage ID:', 'StageID:', or similar). Example: 'c174444a-e0d3-49c2-b76f-6e407ea2af71'. Used for calendar selection and subject generation."
+              "⚠️ REQUIRED: Pipeline stage UUID from booking instructions. Extract from line 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' → copy the UUID part. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. If missing, pass instructionsText parameter instead."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id) - EXTRACT from booking instructions if present (look for 'Deal ID:', 'DealID:', or similar). Example: 6819 or '6819'. Automatically fetches customer details (name, email, phone) from the deal database."
+              "⚠️ REQUIRED: Deal ID from booking instructions. Extract from line 'Deal id is 14588' → copy the number part. Format: number. Example: 14588. If missing, pass instructionsText parameter instead."
             ),
           preferredDate: z
             .string()
@@ -505,6 +674,12 @@ const handler = createMcpHandler(
             .describe(
               "Calendar connection ID override (optional). Uses this calendar connection instead of the agent/pipeline selection."
             ),
+          instructionsText: z
+            .string()
+            .optional()
+            .describe(
+              "⚠️ REQUIRED IF boardId/stageId/dealId ARE MISSING: Pass the full booking instructions text here. The system will automatically extract boardId, stageId, and dealId from it. Look for the section starting with '#***Booking Instructions***' in your context and pass that entire section. Example format: 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588'"
+            ),
         },
       },
       async (args) => {
@@ -520,6 +695,9 @@ const handler = createMcpHandler(
             maxSuggestions,
             calendarId,
           } = args;
+          
+          // Access instructionsText safely (it's optional in the schema)
+          const instructionsText = 'instructionsText' in args ? (args as any).instructionsText : undefined;
 
           console.log("find available booking slots (Booking MCP)");
           console.table(args);
@@ -531,6 +709,44 @@ const handler = createMcpHandler(
             stageIdType: typeof args.stageId,
             dealIdType: typeof args.dealId,
           });
+
+          // Fallback: Extract IDs from instructionsText if provided and IDs are missing
+          let extractedBoardIdForSlots = boardId;
+          let extractedStageIdForSlots = stageId;
+          let extractedDealIdForSlots = dealId;
+
+          if (instructionsText && (!boardId || !stageId || !dealId)) {
+            console.log("🔍 Extracting missing IDs from provided instructions text...");
+            try {
+              const extracted = extractBookingIds(instructionsText);
+              
+              if (!extractedBoardIdForSlots && extracted.boardId) {
+                extractedBoardIdForSlots = extracted.boardId;
+                console.log(`✅ Extracted boardId from instructions: ${extractedBoardIdForSlots}`);
+              }
+              if (!extractedStageIdForSlots && extracted.stageId) {
+                extractedStageIdForSlots = extracted.stageId;
+                console.log(`✅ Extracted stageId from instructions: ${extractedStageIdForSlots}`);
+              }
+              if (!extractedDealIdForSlots && extracted.dealId) {
+                const parsed = typeof extracted.dealId === 'number' ? extracted.dealId : parseInt(String(extracted.dealId), 10);
+                if (!isNaN(parsed)) {
+                  extractedDealIdForSlots = parsed;
+                  console.log(`✅ Extracted dealId from instructions: ${extractedDealIdForSlots}`);
+                }
+              }
+            } catch (error) {
+              console.warn("⚠️ Failed to extract IDs from instructions text:", error);
+            }
+          }
+
+          // Warn if still missing after extraction attempt
+          if (!extractedBoardIdForSlots || !extractedStageIdForSlots || !extractedDealIdForSlots) {
+            console.warn("⚠️ Missing IDs - These should be extracted from booking instructions:");
+            if (!extractedBoardIdForSlots) console.warn("  - boardId not found (look for 'Board Id is' or 'Board Id:' in instructions)");
+            if (!extractedStageIdForSlots) console.warn("  - stageId not found (look for 'Stage Id is' or 'Stage Id:' in instructions)");
+            if (!extractedDealIdForSlots) console.warn("  - dealId not found (look for 'Deal id is' or 'Deal id:' in instructions)");
+          }
 
           // Convert and validate clientId
           const numericClientId =
@@ -548,14 +764,15 @@ const handler = createMcpHandler(
           }
 
           // Convert dealId to number if it's a string
-          // Note: Zod transform should convert strings to numbers, but we handle both cases for safety
+          // Use extracted value if original was missing
+          const dealIdToUseForSlots = extractedDealIdForSlots !== undefined ? extractedDealIdForSlots : dealId;
           let numericDealIdForSlots: number | undefined = undefined;
-          if (dealId !== undefined && dealId !== null) {
-            if (typeof dealId === "number") {
-              numericDealIdForSlots = dealId;
+          if (dealIdToUseForSlots !== undefined && dealIdToUseForSlots !== null) {
+            if (typeof dealIdToUseForSlots === "number") {
+              numericDealIdForSlots = dealIdToUseForSlots;
             } else {
               // Handle string case (shouldn't happen after Zod transform, but safe to handle)
-              const dealIdStr = String(dealId);
+              const dealIdStr = String(dealIdToUseForSlots);
               const trimmed = dealIdStr.trim();
               if (trimmed !== "") {
                 const parsed = parseInt(trimmed, 10);
@@ -567,17 +784,20 @@ const handler = createMcpHandler(
           }
 
           // Normalize boardId and stageId (handle empty strings, null, etc.)
+          // Use extracted values if original was missing
           let normalizedBoardIdForSlots: string | undefined = undefined;
-          if (boardId && typeof boardId === "string") {
-            const trimmed = boardId.trim();
+          const boardIdToUseForSlots = extractedBoardIdForSlots || boardId;
+          if (boardIdToUseForSlots && typeof boardIdToUseForSlots === "string") {
+            const trimmed = boardIdToUseForSlots.trim();
             if (trimmed !== "") {
               normalizedBoardIdForSlots = trimmed;
             }
           }
 
           let normalizedStageIdForSlots: string | undefined = undefined;
-          if (stageId && typeof stageId === "string") {
-            const trimmed = stageId.trim();
+          const stageIdToUseForSlots = extractedStageIdForSlots || stageId;
+          if (stageIdToUseForSlots && typeof stageIdToUseForSlots === "string") {
+            const trimmed = stageIdToUseForSlots.trim();
             if (trimmed !== "") {
               normalizedStageIdForSlots = trimmed;
             }
