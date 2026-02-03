@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import { BookingOperations } from "@/lib/helpers/booking_functions";
+import { extractBookingIds } from "@/lib/helpers/toon-instructions";
 import type {
   BookCustomerAppointmentRequest,
   FindBookingSlotsRequest,
@@ -154,17 +155,16 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: `Book a customer appointment with an agent. REQUIRED: Before calling this tool, scan ALL booking instructions, agent instructions, and context for these IDs and ALWAYS include them: boardId, stageId, dealId. These are usually in the booking instructions section.
+        description: `Book a customer appointment with an agent. REQUIRED: Extract boardId, stageId, and dealId from booking instructions and include them.
 
-If instructions are in TOON format, extract from the bookingConfig structure:
-\`\`\`toon
-bookingConfig{boardId,stageId,dealId,agentId,clientId,timezone}:
-  b44305a9-9a2f-408c-b2d0-2a0b73fc3142,afac5248-59e5-41f4-b06c-01ea68d6af6a,14588,e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2,10000002,Africa/Casablanca
-\`\`\`
+EXTRACTION METHODS (use one):
+1. Extract IDs yourself and pass: boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142', stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a', dealId=14588
+2. If extraction fails, pass instructionsText parameter with the full instructions text - IDs will be extracted automatically.
 
-If instructions are in text format, look for: 'Board Id:', 'Board ID:', 'boardId' for boardId; 'Stage Id:', 'Stage ID:', 'stageId' for stageId; 'Deal id:', 'Deal ID:', 'dealId' for dealId.
-
-Example: 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142' → boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'.
+Look for these patterns in instructions:
+- 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+- 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' or 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'
+- 'Deal id is 14588' or 'Deal id: 14588'
 
 Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.`,
         inputSchema: {
@@ -276,6 +276,7 @@ Automatically searches customer database, checks calendar conflicts, validates o
             location,
             isOnlineMeeting,
             calendarId,
+            instructionsText,
           } = args;
 
           console.log("book customer appointment (Booking MCP)");
@@ -289,12 +290,39 @@ Automatically searches customer database, checks calendar conflicts, validates o
             dealIdType: typeof args.dealId,
           });
 
-          // Warn if critical IDs are missing (they might be in instructions)
-          if (!args.boardId || !args.stageId || !args.dealId) {
-            console.warn("⚠️ Missing IDs - Check if these are in booking instructions:");
-            if (!args.boardId) console.warn("  - boardId not provided (look for 'Board Id:' in instructions)");
-            if (!args.stageId) console.warn("  - stageId not provided (look for 'Stage Id:' in instructions)");
-            if (!args.dealId) console.warn("  - dealId not provided (look for 'Deal id:' in instructions)");
+          // Fallback: Extract IDs from instructionsText if provided and IDs are missing
+          let extractedBoardId = boardId;
+          let extractedStageId = stageId;
+          let extractedDealId = dealId;
+
+          if (instructionsText && (!boardId || !stageId || !dealId)) {
+            console.log("🔍 Extracting missing IDs from provided instructions text...");
+            try {
+              const extracted = extractBookingIds(instructionsText);
+              
+              if (!extractedBoardId && extracted.boardId) {
+                extractedBoardId = extracted.boardId;
+                console.log(`✅ Extracted boardId from instructions: ${extractedBoardId}`);
+              }
+              if (!extractedStageId && extracted.stageId) {
+                extractedStageId = extracted.stageId;
+                console.log(`✅ Extracted stageId from instructions: ${extractedStageId}`);
+              }
+              if (!extractedDealId && extracted.dealId) {
+                extractedDealId = extracted.dealId;
+                console.log(`✅ Extracted dealId from instructions: ${extractedDealId}`);
+              }
+            } catch (error) {
+              console.warn("⚠️ Failed to extract IDs from instructions text:", error);
+            }
+          }
+
+          // Warn if still missing after extraction attempt
+          if (!extractedBoardId || !extractedStageId || !extractedDealId) {
+            console.warn("⚠️ Missing IDs - These should be extracted from booking instructions:");
+            if (!extractedBoardId) console.warn("  - boardId not found (look for 'Board Id is' or 'Board Id:' in instructions)");
+            if (!extractedStageId) console.warn("  - stageId not found (look for 'Stage Id is' or 'Stage Id:' in instructions)");
+            if (!extractedDealId) console.warn("  - dealId not found (look for 'Deal id is' or 'Deal id:' in instructions)");
           }
 
           // Convert and validate clientId
@@ -313,8 +341,10 @@ Automatically searches customer database, checks calendar conflicts, validates o
           }
 
           // Convert dealId to number if it's a string
-          const numericDealId = dealId !== undefined 
-            ? (typeof dealId === "number" ? dealId : (typeof dealId === "string" ? parseInt(dealId, 10) : undefined))
+          // Use extracted value if original was missing
+          const dealIdToUse = extractedDealId !== undefined && extractedDealId !== null ? extractedDealId : dealId;
+          const numericDealId = dealIdToUse !== undefined 
+            ? (typeof dealIdToUse === "number" ? dealIdToUse : (typeof dealIdToUse === "string" ? parseInt(dealIdToUse, 10) : undefined))
             : undefined;
 
           // Validate dealId is a valid number if provided
@@ -330,17 +360,20 @@ Automatically searches customer database, checks calendar conflicts, validates o
           }
 
           // Normalize boardId and stageId (handle empty strings, null, etc.)
+          // Use extracted values if original was missing
           let normalizedBoardId: string | undefined = undefined;
-          if (boardId && typeof boardId === "string") {
-            const trimmed = boardId.trim();
+          const boardIdToUse = extractedBoardId || boardId;
+          if (boardIdToUse && typeof boardIdToUse === "string") {
+            const trimmed = boardIdToUse.trim();
             if (trimmed !== "") {
               normalizedBoardId = trimmed;
             }
           }
 
           let normalizedStageId: string | undefined = undefined;
-          if (stageId && typeof stageId === "string") {
-            const trimmed = stageId.trim();
+          const stageIdToUse = extractedStageId || stageId;
+          if (stageIdToUse && typeof stageIdToUse === "string") {
+            const trimmed = stageIdToUse.trim();
             if (trimmed !== "") {
               normalizedStageId = trimmed;
             }
@@ -473,17 +506,18 @@ Automatically searches customer database, checks calendar conflicts, validates o
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: `Find available time slots for booking with an agent. REQUIRED: Before calling this tool, scan ALL booking instructions, agent instructions, and context for these IDs and ALWAYS include them: boardId, stageId, dealId.
+        description: `Find available time slots for booking with an agent. REQUIRED: Extract boardId, stageId, and dealId from booking instructions and include them.
 
-If instructions are in TOON format, extract from the bookingConfig structure:
-\`\`\`toon
-bookingConfig{boardId,stageId,dealId,agentId,clientId,timezone}:
-  b44305a9-9a2f-408c-b2d0-2a0b73fc3142,afac5248-59e5-41f4-b06c-01ea68d6af6a,14588,e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2,10000002,Africa/Casablanca
-\`\`\`
+EXTRACTION METHODS (use one):
+1. Extract IDs yourself and pass: boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142', stageId='afac5248-59e5-41f4-b06c-01ea68d6af6a', dealId=14588
+2. If extraction fails, pass instructionsText parameter with the full instructions text - IDs will be extracted automatically.
 
-If instructions are in text format, look for: 'Board Id:', 'Board ID:', 'boardId' for boardId; 'Stage Id:', 'Stage ID:', 'stageId' for stageId; 'Deal id:', 'Deal ID:', 'dealId' for dealId.
+Look for these patterns in instructions:
+- 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'
+- 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a' or 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'
+- 'Deal id is 14588' or 'Deal id: 14588'
 
-These are usually in the booking instructions section. Checks agent's calendar and office hours to suggest optimal meeting times.`,
+Checks agent's calendar and office hours to suggest optimal meeting times.`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -535,6 +569,12 @@ These are usually in the booking instructions section. Checks agent's calendar a
             .describe(
               "Calendar connection ID override (optional). Uses this calendar connection instead of the agent/pipeline selection."
             ),
+          instructionsText: z
+            .string()
+            .optional()
+            .describe(
+              "OPTIONAL: If boardId/stageId/dealId are missing, pass the booking instructions text here and they will be extracted automatically. Look for lines like 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a'."
+            ),
         },
       },
       async (args) => {
@@ -549,6 +589,7 @@ These are usually in the booking instructions section. Checks agent's calendar a
             durationMinutes,
             maxSuggestions,
             calendarId,
+            instructionsText,
           } = args;
 
           console.log("find available booking slots (Booking MCP)");
@@ -562,12 +603,39 @@ These are usually in the booking instructions section. Checks agent's calendar a
             dealIdType: typeof args.dealId,
           });
 
-          // Warn if critical IDs are missing (they might be in instructions)
-          if (!args.boardId || !args.stageId || !args.dealId) {
-            console.warn("⚠️ Missing IDs - Check if these are in booking instructions:");
-            if (!args.boardId) console.warn("  - boardId not provided (look for 'Board Id:' in instructions)");
-            if (!args.stageId) console.warn("  - stageId not provided (look for 'Stage Id:' in instructions)");
-            if (!args.dealId) console.warn("  - dealId not provided (look for 'Deal id:' in instructions)");
+          // Fallback: Extract IDs from instructionsText if provided and IDs are missing
+          let extractedBoardIdForSlots = boardId;
+          let extractedStageIdForSlots = stageId;
+          let extractedDealIdForSlots = dealId;
+
+          if (instructionsText && (!boardId || !stageId || !dealId)) {
+            console.log("🔍 Extracting missing IDs from provided instructions text...");
+            try {
+              const extracted = extractBookingIds(instructionsText);
+              
+              if (!extractedBoardIdForSlots && extracted.boardId) {
+                extractedBoardIdForSlots = extracted.boardId;
+                console.log(`✅ Extracted boardId from instructions: ${extractedBoardIdForSlots}`);
+              }
+              if (!extractedStageIdForSlots && extracted.stageId) {
+                extractedStageIdForSlots = extracted.stageId;
+                console.log(`✅ Extracted stageId from instructions: ${extractedStageIdForSlots}`);
+              }
+              if (!extractedDealIdForSlots && extracted.dealId) {
+                extractedDealIdForSlots = extracted.dealId;
+                console.log(`✅ Extracted dealId from instructions: ${extractedDealIdForSlots}`);
+              }
+            } catch (error) {
+              console.warn("⚠️ Failed to extract IDs from instructions text:", error);
+            }
+          }
+
+          // Warn if still missing after extraction attempt
+          if (!extractedBoardIdForSlots || !extractedStageIdForSlots || !extractedDealIdForSlots) {
+            console.warn("⚠️ Missing IDs - These should be extracted from booking instructions:");
+            if (!extractedBoardIdForSlots) console.warn("  - boardId not found (look for 'Board Id is' or 'Board Id:' in instructions)");
+            if (!extractedStageIdForSlots) console.warn("  - stageId not found (look for 'Stage Id is' or 'Stage Id:' in instructions)");
+            if (!extractedDealIdForSlots) console.warn("  - dealId not found (look for 'Deal id is' or 'Deal id:' in instructions)");
           }
 
           // Convert and validate clientId
@@ -586,14 +654,15 @@ These are usually in the booking instructions section. Checks agent's calendar a
           }
 
           // Convert dealId to number if it's a string
-          // Note: Zod transform should convert strings to numbers, but we handle both cases for safety
+          // Use extracted value if original was missing
+          const dealIdToUseForSlots = extractedDealIdForSlots !== undefined ? extractedDealIdForSlots : dealId;
           let numericDealIdForSlots: number | undefined = undefined;
-          if (dealId !== undefined && dealId !== null) {
-            if (typeof dealId === "number") {
-              numericDealIdForSlots = dealId;
+          if (dealIdToUseForSlots !== undefined && dealIdToUseForSlots !== null) {
+            if (typeof dealIdToUseForSlots === "number") {
+              numericDealIdForSlots = dealIdToUseForSlots;
             } else {
               // Handle string case (shouldn't happen after Zod transform, but safe to handle)
-              const dealIdStr = String(dealId);
+              const dealIdStr = String(dealIdToUseForSlots);
               const trimmed = dealIdStr.trim();
               if (trimmed !== "") {
                 const parsed = parseInt(trimmed, 10);
@@ -605,17 +674,20 @@ These are usually in the booking instructions section. Checks agent's calendar a
           }
 
           // Normalize boardId and stageId (handle empty strings, null, etc.)
+          // Use extracted values if original was missing
           let normalizedBoardIdForSlots: string | undefined = undefined;
-          if (boardId && typeof boardId === "string") {
-            const trimmed = boardId.trim();
+          const boardIdToUseForSlots = extractedBoardIdForSlots || boardId;
+          if (boardIdToUseForSlots && typeof boardIdToUseForSlots === "string") {
+            const trimmed = boardIdToUseForSlots.trim();
             if (trimmed !== "") {
               normalizedBoardIdForSlots = trimmed;
             }
           }
 
           let normalizedStageIdForSlots: string | undefined = undefined;
-          if (stageId && typeof stageId === "string") {
-            const trimmed = stageId.trim();
+          const stageIdToUseForSlots = extractedStageIdForSlots || stageId;
+          if (stageIdToUseForSlots && typeof stageIdToUseForSlots === "string") {
+            const trimmed = stageIdToUseForSlots.trim();
             if (trimmed !== "") {
               normalizedStageIdForSlots = trimmed;
             }
