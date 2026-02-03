@@ -154,7 +154,19 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: "Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars. CRITICAL: Extract and pass boardId, stageId, and dealId if they appear ANYWHERE in the booking instructions, prompt, or context (e.g., '**Board ID:** `xxx`', '**Stage ID:** `xxx`', '**Deal ID:** `xxx`'). The dealId automatically fetches customer name, email, and phone from the database.",
+        description: `Book a customer appointment with an agent. REQUIRED: Before calling this tool, scan ALL booking instructions, agent instructions, and context for these IDs and ALWAYS include them: boardId, stageId, dealId. These are usually in the booking instructions section.
+
+If instructions are in TOON format, extract from the bookingConfig structure:
+\`\`\`toon
+bookingConfig{boardId,stageId,dealId,agentId,clientId,timezone}:
+  b44305a9-9a2f-408c-b2d0-2a0b73fc3142,afac5248-59e5-41f4-b06c-01ea68d6af6a,14588,e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2,10000002,Africa/Casablanca
+\`\`\`
+
+If instructions are in text format, look for: 'Board Id:', 'Board ID:', 'boardId' for boardId; 'Stage Id:', 'Stage ID:', 'stageId' for stageId; 'Deal id:', 'Deal ID:', 'dealId' for dealId.
+
+Example: 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142' → boardId='b44305a9-9a2f-408c-b2d0-2a0b73fc3142'.
+
+Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -170,20 +182,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID - EXTRACT from booking instructions if present (look for 'Board ID:', 'BoardID:', or similar). Example: '5898f07d-2473-4a1f-892a-ea5bc1203576'. Uses the pipeline's assigned calendar connection for booking when agent has no calendar."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline/board UUID. MUST extract from booking instructions if present. Look for: 'Board Id:', 'Board ID:', 'boardId', 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Uses pipeline's calendar when agent has no calendar. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID - EXTRACT from booking instructions if present (look for 'Stage ID:', 'StageID:', or similar). Example: 'c174444a-e0d3-49c2-b76f-6e407ea2af71'. Used to generate the appointment subject (e.g., 'Discovery Call / Pre-Demo')."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline stage UUID. MUST extract from booking instructions if present. Look for: 'Stage Id:', 'Stage ID:', 'stageId', 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. Used to generate appointment subject. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id) - EXTRACT from booking instructions if present (look for 'Deal ID:', 'DealID:', or similar). Example: 6819 or '6819'. Automatically fetches customer name/email/phone from the deal database and generates better appointment subjects."
+              "REQUIRED IF IN INSTRUCTIONS: Deal ID (stage_items.id). MUST extract from booking instructions if present. Look for: 'Deal id:', 'Deal ID:', 'dealId', 'Deal id: 14588'. Format: number. Example: 14588 or '14588'. Automatically fetches customer name/email/phone from deal database. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           customerName: z
             .string()
@@ -276,6 +288,14 @@ const handler = createMcpHandler(
             stageIdType: typeof args.stageId,
             dealIdType: typeof args.dealId,
           });
+
+          // Warn if critical IDs are missing (they might be in instructions)
+          if (!args.boardId || !args.stageId || !args.dealId) {
+            console.warn("⚠️ Missing IDs - Check if these are in booking instructions:");
+            if (!args.boardId) console.warn("  - boardId not provided (look for 'Board Id:' in instructions)");
+            if (!args.stageId) console.warn("  - stageId not provided (look for 'Stage Id:' in instructions)");
+            if (!args.dealId) console.warn("  - dealId not provided (look for 'Deal id:' in instructions)");
+          }
 
           // Convert and validate clientId
           const numericClientId =
@@ -453,7 +473,17 @@ const handler = createMcpHandler(
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: "Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times. CRITICAL: Extract and pass boardId, stageId, and dealId if they appear ANYWHERE in the booking instructions, prompt, or context (e.g., '**Board ID:** `xxx`', '**Stage ID:** `xxx`', '**Deal ID:** `xxx`'). These IDs enable pipeline-specific calendar selection and customer lookup.",
+        description: `Find available time slots for booking with an agent. REQUIRED: Before calling this tool, scan ALL booking instructions, agent instructions, and context for these IDs and ALWAYS include them: boardId, stageId, dealId.
+
+If instructions are in TOON format, extract from the bookingConfig structure:
+\`\`\`toon
+bookingConfig{boardId,stageId,dealId,agentId,clientId,timezone}:
+  b44305a9-9a2f-408c-b2d0-2a0b73fc3142,afac5248-59e5-41f4-b06c-01ea68d6af6a,14588,e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2,10000002,Africa/Casablanca
+\`\`\`
+
+If instructions are in text format, look for: 'Board Id:', 'Board ID:', 'boardId' for boardId; 'Stage Id:', 'Stage ID:', 'stageId' for stageId; 'Deal id:', 'Deal ID:', 'dealId' for dealId.
+
+These are usually in the booking instructions section. Checks agent's calendar and office hours to suggest optimal meeting times.`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -467,20 +497,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID - EXTRACT from booking instructions if present (look for 'Board ID:', 'BoardID:', or similar). Example: '5898f07d-2473-4a1f-892a-ea5bc1203576'. Uses the pipeline's assigned calendar connection when agent has no calendar."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline/board UUID. MUST extract from booking instructions if present. Look for: 'Board Id:', 'Board ID:', 'boardId', 'Board Id: b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Format: UUID string. Example: 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'. Uses pipeline's calendar when agent has no calendar. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID - EXTRACT from booking instructions if present (look for 'Stage ID:', 'StageID:', or similar). Example: 'c174444a-e0d3-49c2-b76f-6e407ea2af71'. Used for calendar selection and subject generation."
+              "REQUIRED IF IN INSTRUCTIONS: Pipeline stage UUID. MUST extract from booking instructions if present. Look for: 'Stage Id:', 'Stage ID:', 'stageId', 'Stage Id: afac5248-59e5-41f4-b06c-01ea68d6af6a'. Format: UUID string. Example: 'afac5248-59e5-41f4-b06c-01ea68d6af6a'. Used for calendar selection. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id) - EXTRACT from booking instructions if present (look for 'Deal ID:', 'DealID:', or similar). Example: 6819 or '6819'. Automatically fetches customer details (name, email, phone) from the deal database."
+              "REQUIRED IF IN INSTRUCTIONS: Deal ID (stage_items.id). MUST extract from booking instructions if present. Look for: 'Deal id:', 'Deal ID:', 'dealId', 'Deal id: 14588'. Format: number. Example: 14588 or '14588'. Automatically fetches customer details. SCAN ALL INSTRUCTIONS BEFORE CALLING."
             ),
           preferredDate: z
             .string()
@@ -531,6 +561,14 @@ const handler = createMcpHandler(
             stageIdType: typeof args.stageId,
             dealIdType: typeof args.dealId,
           });
+
+          // Warn if critical IDs are missing (they might be in instructions)
+          if (!args.boardId || !args.stageId || !args.dealId) {
+            console.warn("⚠️ Missing IDs - Check if these are in booking instructions:");
+            if (!args.boardId) console.warn("  - boardId not provided (look for 'Board Id:' in instructions)");
+            if (!args.stageId) console.warn("  - stageId not provided (look for 'Stage Id:' in instructions)");
+            if (!args.dealId) console.warn("  - dealId not provided (look for 'Deal id:' in instructions)");
+          }
 
           // Convert and validate clientId
           const numericClientId =

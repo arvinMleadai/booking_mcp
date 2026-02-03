@@ -1,0 +1,12 @@
+---
+alwaysApply: true
+---
+name: luxon-best-practices.mdc
+description: Best practices for date and time handling with Luxon
+globs: **/*.{ts,tsx}
+---
+
+- Use Luxon's DateTime for all date manipulations to avoid native Date pitfalls.
+- Leverage Luxon's formatting options for consistent date presentation.
+- Utilize time zone support to handle user-specific date and time correctly.
+- Avoid mutating DateTime objects; use immutable methods for safer code.
