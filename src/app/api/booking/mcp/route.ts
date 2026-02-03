@@ -12,16 +12,20 @@ import type {
 
 const handler = createMcpHandler(
   (server) => {
-    // ExtractBookingIds - Helper tool to extract IDs from booking instructions
+    // ExtractBookingIds - Helper tool that uses LLM API to extract IDs from booking instructions
     server.registerTool(
       "ExtractBookingIds",
       {
-        description: "Extract boardId, stageId, dealId, agentId, clientId, and timezone from booking instructions text. Use this tool FIRST if you need to extract IDs from instructions before calling booking tools. The instructions usually contain lines like 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142' or 'Deal id is 14588'.",
+        description: `Extract boardId, stageId, dealId, agentId, clientId, and timezone from booking instructions text using AI extraction.
+
+⚠️ IMPORTANT: Use this tool FIRST before calling BookCustomerAppointment or FindAvailableBookingSlots if you cannot extract IDs directly from your instructions context.
+
+Simply pass the instructionsText parameter with the full booking instructions section. The tool will use a powerful LLM to extract all IDs automatically.`,
         inputSchema: {
           instructionsText: z
             .string()
             .describe(
-              "The booking instructions text containing IDs. Look for patterns like 'Board Id is ...', 'Stage Id is ...', 'Deal id is ...', 'Agent ID is ...', 'Client ID is ...', 'Timezone is ...'"
+              "The full booking instructions text containing IDs. This should be the section starting with '#***Booking Instructions***' from your context. Include the entire instructions section. The tool will automatically extract all IDs from this text."
             ),
         },
       },
@@ -29,43 +33,242 @@ const handler = createMcpHandler(
         try {
           const { instructionsText } = args;
 
-          console.log("🔍 Extracting booking IDs from instructions...");
+          console.log("🔍 Using LLM API to extract booking IDs from instructions...");
+          console.log("📝 Instructions text length:", instructionsText?.length || 0);
 
-          const extracted = extractBookingIds(instructionsText);
-
-          if (!extracted.boardId && !extracted.stageId && !extracted.dealId) {
+          if (!instructionsText || instructionsText.trim().length === 0) {
             return {
               content: [
                 {
                   type: "text",
-                  text: `NO IDs FOUND\n\nCould not extract boardId, stageId, or dealId from the instructions.\n\nMake sure the instructions contain lines like:\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588`,
+                  text: `❌ NO INSTRUCTIONS PROVIDED\n\nPlease provide the instructionsText parameter with the full booking instructions section.`,
                 },
               ],
             };
           }
 
-          let responseText = `EXTRACTED BOOKING IDs\n\n`;
-          
-          if (extracted.boardId) {
-            responseText += `boardId: ${extracted.boardId}\n`;
-          }
-          if (extracted.stageId) {
-            responseText += `stageId: ${extracted.stageId}\n`;
-          }
-          if (extracted.dealId) {
-            responseText += `dealId: ${extracted.dealId}\n`;
-          }
-          if (extracted.agentId) {
-            responseText += `agentId: ${extracted.agentId}\n`;
-          }
-          if (extracted.clientId) {
-            responseText += `clientId: ${extracted.clientId}\n`;
-          }
-          if (extracted.timezone) {
-            responseText += `timezone: ${extracted.timezone}\n`;
+          // Get API key from environment (support both Groq and OpenAI)
+          const groqApiKey = process.env.GROQ_API_KEY;
+          const openaiApiKey = process.env.OPENAI_API_KEY;
+          const apiKey = groqApiKey || openaiApiKey;
+          const apiUrl = groqApiKey 
+            ? 'https://api.groq.com/openai/v1/chat/completions'
+            : 'https://api.openai.com/v1/chat/completions';
+          const model = groqApiKey 
+            ? 'llama-3.1-70b-versatile' // Groq model
+            : 'gpt-4o-mini'; // OpenAI model
+
+          if (!apiKey) {
+            console.error("❌ No API key found. Set GROQ_API_KEY or OPENAI_API_KEY environment variable.");
+            // Fallback to regex extraction if no API key
+            console.log("🔄 Falling back to regex extraction...");
+            const extracted = extractBookingIds(instructionsText);
+            
+            if (!extracted.boardId && !extracted.stageId && !extracted.dealId) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `❌ NO IDs FOUND\n\nCould not extract boardId, stageId, or dealId from the instructions.\n\nMake sure the instructions contain lines like:\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588\n\nNote: Set GROQ_API_KEY or OPENAI_API_KEY environment variable for better extraction.`,
+                  },
+                ],
+              };
+            }
+
+            let responseText = `✅ EXTRACTED BOOKING IDs (regex fallback)\n\n`;
+            if (extracted.boardId) responseText += `boardId: ${extracted.boardId}\n`;
+            if (extracted.stageId) responseText += `stageId: ${extracted.stageId}\n`;
+            if (extracted.dealId) responseText += `dealId: ${extracted.dealId}\n`;
+            if (extracted.agentId) responseText += `agentId: ${extracted.agentId}\n`;
+            if (extracted.clientId) responseText += `clientId: ${extracted.clientId}\n`;
+            if (extracted.timezone) responseText += `timezone: ${extracted.timezone}\n`;
+            responseText += `\n✅ Use these extracted IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: responseText,
+                },
+              ],
+            };
           }
 
-          responseText += `\nUse these IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+          // Create LLM extraction prompt
+          const extractionPrompt = {
+            model: model,
+            messages: [
+              {
+                role: 'system',
+                content: `Extract booking IDs from the provided instructions text. Look for these specific patterns and extract the values:
+
+REQUIRED IDs to extract:
+- boardId: Look for "Board Id is <UUID>" or "Board Id: <UUID>" → extract the UUID (36 characters with hyphens)
+- stageId: Look for "Stage Id is <UUID>" or "Stage Id: <UUID>" → extract the UUID (36 characters with hyphens)
+- dealId: Look for "Deal id is <number>" or "Deal id: <number>" → extract the number
+
+OPTIONAL IDs to extract:
+- agentId: Look for "Agent ID is <UUID>" or "Agent ID: <UUID>" → extract the UUID
+- clientId: Look for "Client ID is <number>" or "Client ID: <number>" → extract the number
+- timezone: Look for "Timezone is <timezone>" or "Timezone: <timezone>" → extract the timezone string (IANA format)
+
+Rules:
+- UUIDs must be exactly 36 characters with hyphens (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+- Numbers should be extracted as integers
+- If a value is not found, use null or omit it
+- Be precise and extract exactly what follows "is" or ":" after the label
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "boardId": "uuid-string or null",
+  "stageId": "uuid-string or null",
+  "dealId": number or null,
+  "agentId": "uuid-string or null",
+  "clientId": number or null,
+  "timezone": "string or null"
+}`
+              },
+              {
+                role: 'user',
+                content: `Extract booking IDs from these instructions:\n\n${instructionsText}`
+              }
+            ],
+            response_format: {
+              type: 'json_object'
+            },
+            temperature: 0.1, // Low temperature for precise extraction
+          };
+
+          // Call LLM API
+          const apiResponse = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify(extractionPrompt)
+          });
+
+          if (!apiResponse.ok) {
+            const errorText = await apiResponse.text();
+            console.error("❌ LLM API error:", apiResponse.status, errorText);
+            
+            // Fallback to regex extraction
+            console.log("🔄 Falling back to regex extraction...");
+            const extracted = extractBookingIds(instructionsText);
+            
+            if (!extracted.boardId && !extracted.stageId && !extracted.dealId) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `❌ EXTRACTION FAILED\n\nLLM API call failed (${apiResponse.status}). Could not extract IDs using fallback method either.\n\nError: ${errorText}\n\nPlease check your API key and try again.`,
+                  },
+                ],
+              };
+            }
+
+            let responseText = `✅ EXTRACTED BOOKING IDs (regex fallback)\n\n`;
+            if (extracted.boardId) responseText += `boardId: ${extracted.boardId}\n`;
+            if (extracted.stageId) responseText += `stageId: ${extracted.stageId}\n`;
+            if (extracted.dealId) responseText += `dealId: ${extracted.dealId}\n`;
+            if (extracted.agentId) responseText += `agentId: ${extracted.agentId}\n`;
+            if (extracted.clientId) responseText += `clientId: ${extracted.clientId}\n`;
+            if (extracted.timezone) responseText += `timezone: ${extracted.timezone}\n`;
+            responseText += `\n✅ Use these extracted IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: responseText,
+                },
+              ],
+            };
+          }
+
+          const apiData = await apiResponse.json();
+          const extractedJson = JSON.parse(apiData.choices[0].message.content);
+
+          console.log("📋 LLM extracted values:", extractedJson);
+
+          // Validate that at least critical IDs are present
+          if (!extractedJson.boardId && !extractedJson.stageId && !extractedJson.dealId) {
+            // Fallback to regex extraction
+            console.log("🔄 LLM didn't extract critical IDs, falling back to regex...");
+            const extracted = extractBookingIds(instructionsText);
+            
+            if (!extracted.boardId && !extracted.stageId && !extracted.dealId) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `❌ NO IDs EXTRACTED\n\nThe LLM could not extract boardId, stageId, or dealId from the instructions.\n\nPlease ensure the instructions contain lines like:\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588`,
+                  },
+                ],
+              };
+            }
+
+            let responseText = `✅ EXTRACTED BOOKING IDs (regex fallback)\n\n`;
+            if (extracted.boardId) responseText += `boardId: ${extracted.boardId}\n`;
+            if (extracted.stageId) responseText += `stageId: ${extracted.stageId}\n`;
+            if (extracted.dealId) responseText += `dealId: ${extracted.dealId}\n`;
+            if (extracted.agentId) responseText += `agentId: ${extracted.agentId}\n`;
+            if (extracted.clientId) responseText += `clientId: ${extracted.clientId}\n`;
+            if (extracted.timezone) responseText += `timezone: ${extracted.timezone}\n`;
+            responseText += `\n✅ Use these extracted IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: responseText,
+                },
+              ],
+            };
+          }
+
+          // Validate UUID formats
+          const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          
+          if (extractedJson.boardId && extractedJson.boardId !== 'null' && !uuidPattern.test(extractedJson.boardId)) {
+            console.warn("⚠️ Invalid boardId format from LLM:", extractedJson.boardId);
+            extractedJson.boardId = null;
+          }
+          if (extractedJson.stageId && extractedJson.stageId !== 'null' && !uuidPattern.test(extractedJson.stageId)) {
+            console.warn("⚠️ Invalid stageId format from LLM:", extractedJson.stageId);
+            extractedJson.stageId = null;
+          }
+          if (extractedJson.agentId && extractedJson.agentId !== 'null' && !uuidPattern.test(extractedJson.agentId)) {
+            console.warn("⚠️ Invalid agentId format from LLM:", extractedJson.agentId);
+            extractedJson.agentId = null;
+          }
+
+          // Build success response
+          let responseText = `✅ EXTRACTED BOOKING IDs\n\n`;
+          
+          if (extractedJson.boardId && extractedJson.boardId !== 'null') {
+            responseText += `boardId: ${extractedJson.boardId}\n`;
+          }
+          if (extractedJson.stageId && extractedJson.stageId !== 'null') {
+            responseText += `stageId: ${extractedJson.stageId}\n`;
+          }
+          if (extractedJson.dealId && extractedJson.dealId !== null && extractedJson.dealId !== 'null') {
+            responseText += `dealId: ${extractedJson.dealId}\n`;
+          }
+          if (extractedJson.agentId && extractedJson.agentId !== 'null') {
+            responseText += `agentId: ${extractedJson.agentId}\n`;
+          }
+          if (extractedJson.clientId && extractedJson.clientId !== null && extractedJson.clientId !== 'null') {
+            responseText += `clientId: ${extractedJson.clientId}\n`;
+          }
+          if (extractedJson.timezone && extractedJson.timezone !== 'null') {
+            responseText += `timezone: ${extractedJson.timezone}\n`;
+          }
+
+          responseText += `\n✅ Use these extracted IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+
+          console.log("✅ Successfully extracted IDs via LLM:", extractedJson);
 
           return {
             content: [
@@ -77,6 +280,35 @@ const handler = createMcpHandler(
           };
         } catch (error) {
           console.error("Error in ExtractBookingIds:", error);
+          
+          // Fallback to regex extraction on error
+          try {
+            console.log("🔄 Error occurred, falling back to regex extraction...");
+            const extracted = extractBookingIds(args.instructionsText || '');
+            
+            if (extracted.boardId || extracted.stageId || extracted.dealId) {
+              let responseText = `✅ EXTRACTED BOOKING IDs (regex fallback after error)\n\n`;
+              if (extracted.boardId) responseText += `boardId: ${extracted.boardId}\n`;
+              if (extracted.stageId) responseText += `stageId: ${extracted.stageId}\n`;
+              if (extracted.dealId) responseText += `dealId: ${extracted.dealId}\n`;
+              if (extracted.agentId) responseText += `agentId: ${extracted.agentId}\n`;
+              if (extracted.clientId) responseText += `clientId: ${extracted.clientId}\n`;
+              if (extracted.timezone) responseText += `timezone: ${extracted.timezone}\n`;
+              responseText += `\n✅ Use these extracted IDs when calling BookCustomerAppointment or FindAvailableBookingSlots.`;
+
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: responseText,
+                  },
+                ],
+              };
+            }
+          } catch (fallbackError) {
+            console.error("Fallback extraction also failed:", fallbackError);
+          }
+
           return {
             content: [
               {
