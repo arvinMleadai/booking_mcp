@@ -132,7 +132,14 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .describe('Booking instructions from VAPI containing all IDs'),
+        .optional()
+        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+      agentId: z.string().optional().describe('Agent UUID'),
+      clientId: z.number().optional().describe('Client ID'),
+      boardId: z.string().optional().describe('Board UUID'),
+      stageId: z.string().optional().describe('Stage UUID'),
+      dealId: z.number().optional().describe('Deal ID'),
+      timezone: z.string().optional().describe('Timezone'),
       startDateTime: z
         .string()
         .describe('Start time in ISO 8601 format (e.g., 2025-12-06T13:00:00)'),
@@ -158,6 +165,12 @@ const handler = createMcpHandler((server) => {
 
         const result = await BookingService.bookAppointment({
           instructionsText: args.instructionsText,
+          agentId: args.agentId,
+          clientId: args.clientId,
+          boardId: args.boardId,
+          stageId: args.stageId,
+          dealId: args.dealId,
+          timezone: args.timezone,
           startDateTime: args.startDateTime,
           endDateTime: args.endDateTime,
           customerInfo: {
@@ -207,7 +220,14 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .describe('Booking instructions from VAPI containing all IDs'),
+        .optional()
+        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+      agentId: z.string().optional().describe('Agent UUID'),
+      clientId: z.number().optional().describe('Client ID'),
+      boardId: z.string().optional().describe('Board UUID'),
+      stageId: z.string().optional().describe('Stage UUID'),
+      dealId: z.number().optional().describe('Deal ID'),
+      timezone: z.string().optional().describe('Timezone'),
       preferredDate: z
         .string()
         .describe(
@@ -231,6 +251,12 @@ const handler = createMcpHandler((server) => {
 
         const result = await BookingService.findAvailableSlots({
           instructionsText: args.instructionsText,
+          agentId: args.agentId,
+          clientId: args.clientId,
+          boardId: args.boardId,
+          stageId: args.stageId,
+          dealId: args.dealId,
+          timezone: args.timezone,
           preferredDate: args.preferredDate,
           durationMinutes: args.durationMinutes,
           maxSuggestions: args.maxSuggestions,
@@ -272,7 +298,14 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .describe('Booking instructions from VAPI containing all IDs'),
+        .optional()
+        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+      agentId: z.string().optional().describe('Agent UUID'),
+      clientId: z.number().optional().describe('Client ID'),
+      boardId: z.string().optional().describe('Board UUID'),
+      stageId: z.string().optional().describe('Stage UUID'),
+      dealId: z.number().optional().describe('Deal ID'),
+      timezone: z.string().optional().describe('Timezone'),
       eventId: z.string().describe('Event ID to cancel'),
       calendarId: z.string().optional().describe('Calendar ID override (optional)'),
       notifyCustomer: z
@@ -287,6 +320,12 @@ const handler = createMcpHandler((server) => {
 
         const result = await BookingService.cancelAppointment({
           instructionsText: args.instructionsText,
+          agentId: args.agentId,
+          clientId: args.clientId,
+          boardId: args.boardId,
+          stageId: args.stageId,
+          dealId: args.dealId,
+          timezone: args.timezone,
           eventId: args.eventId,
           calendarId: args.calendarId,
           notifyCustomer: args.notifyCustomer,
@@ -327,7 +366,14 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .describe('Booking instructions from VAPI containing all IDs'),
+        .optional()
+        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+      agentId: z.string().optional().describe('Agent UUID'),
+      clientId: z.number().optional().describe('Client ID'),
+      boardId: z.string().optional().describe('Board UUID'),
+      stageId: z.string().optional().describe('Stage UUID'),
+      dealId: z.number().optional().describe('Deal ID'),
+      timezone: z.string().optional().describe('Timezone'),
       eventId: z.string().describe('Event ID to reschedule'),
       newStartDateTime: z
         .string()
@@ -348,6 +394,12 @@ const handler = createMcpHandler((server) => {
 
         const result = await BookingService.rescheduleAppointment({
           instructionsText: args.instructionsText,
+          agentId: args.agentId,
+          clientId: args.clientId,
+          boardId: args.boardId,
+          stageId: args.stageId,
+          dealId: args.dealId,
+          timezone: args.timezone,
           eventId: args.eventId,
           newStartDateTime: args.newStartDateTime,
           newEndDateTime: args.newEndDateTime,

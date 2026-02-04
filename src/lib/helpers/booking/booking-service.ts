@@ -61,7 +61,18 @@ export class BookingService {
       console.log('📞 [BookingService.bookAppointment] Starting booking process');
 
       // Step 1: Extract and validate IDs
-      const extractResult = this.extractAndValidateIds(request.instructionsText);
+      const extractResult = this.extractAndValidateIds(
+        request.instructionsText,
+        {
+          agentId: request.agentId,
+          clientId: request.clientId,
+          boardId: request.boardId,
+          stageId: request.stageId,
+          dealId: request.dealId,
+          timezone: request.timezone,
+          ...request.extractedIds,
+        }
+      );
       if (!extractResult.valid || !extractResult.ids) {
         return {
           success: false,
@@ -242,7 +253,18 @@ export class BookingService {
       console.log('🔍 [BookingService.findAvailableSlots] Searching for slots');
 
       // Extract and validate IDs
-      const extractResult = this.extractAndValidateIds(request.instructionsText);
+      const extractResult = this.extractAndValidateIds(
+        request.instructionsText,
+        {
+          agentId: request.agentId,
+          clientId: request.clientId,
+          boardId: request.boardId,
+          stageId: request.stageId,
+          dealId: request.dealId,
+          timezone: request.timezone,
+          ...request.extractedIds,
+        }
+      );
       if (!extractResult.valid || !extractResult.ids) {
         return {
           success: false,
@@ -336,7 +358,18 @@ export class BookingService {
     try {
       console.log('🗑️ [BookingService.cancelAppointment] Canceling appointment');
 
-      const extractResult = this.extractAndValidateIds(request.instructionsText);
+      const extractResult = this.extractAndValidateIds(
+        request.instructionsText,
+        {
+          agentId: request.agentId,
+          clientId: request.clientId,
+          boardId: request.boardId,
+          stageId: request.stageId,
+          dealId: request.dealId,
+          timezone: request.timezone,
+          ...request.extractedIds,
+        }
+      );
       if (!extractResult.valid || !extractResult.ids) {
         return {
           success: false,
@@ -402,7 +435,18 @@ export class BookingService {
     try {
       console.log('📅 [BookingService.rescheduleAppointment] Rescheduling appointment');
 
-      const extractResult = this.extractAndValidateIds(request.instructionsText);
+      const extractResult = this.extractAndValidateIds(
+        request.instructionsText,
+        {
+          agentId: request.agentId,
+          clientId: request.clientId,
+          boardId: request.boardId,
+          stageId: request.stageId,
+          dealId: request.dealId,
+          timezone: request.timezone,
+          ...request.extractedIds,
+        }
+      );
       if (!extractResult.valid || !extractResult.ids) {
         return {
           success: false,
@@ -505,28 +549,41 @@ export class BookingService {
 
   /**
    * Extract and validate booking IDs
+   * Merges extracted IDs with explicit IDs from request
    */
-  private static extractAndValidateIds(instructionsText: string): {
+  private static extractAndValidateIds(
+    instructionsText?: string,
+    explicitIds?: Partial<BookingIds>
+  ): {
     valid: boolean;
     ids?: Required<Pick<BookingIds, 'clientId' | 'agentId' | 'boardId' | 'stageId' | 'dealId'>>;
     error?: string;
     code?: ErrorCode;
     details?: Record<string, any>;
   } {
-    const ids = extractBookingIds(instructionsText);
-    const validation = validateRequiredIds(ids);
+    // 1. Extract from text if available
+    const extractedIds = instructionsText ? extractBookingIds(instructionsText) : {};
+
+    // 2. Merge with explicit IDs (explicit takes precedence)
+    const mergedIds: BookingIds = {
+      ...extractedIds,
+      ...explicitIds,
+    };
+
+    // 3. Validate
+    const validation = validateRequiredIds(mergedIds);
 
     if (!validation.valid) {
       return {
         valid: false,
         error: `Missing required IDs: ${validation.missing.join(', ')}`,
         code: 'MISSING_IDS' as ErrorCode,
-        details: { missing: validation.missing, extracted: ids },
+        details: { missing: validation.missing, extracted: extractedIds, explicit: explicitIds },
       };
     }
 
     // Type assertion after validation
-    const validatedIds = ids as Required<Pick<BookingIds, 'clientId' | 'agentId' | 'boardId' | 'stageId' | 'dealId'>>;
+    const validatedIds = mergedIds as Required<Pick<BookingIds, 'clientId' | 'agentId' | 'boardId' | 'stageId' | 'dealId'>>;
 
     return { valid: true, ids: validatedIds };
   }

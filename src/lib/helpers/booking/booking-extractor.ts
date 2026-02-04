@@ -37,7 +37,7 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
   // Extract boardId
   const boardIdMatch = instructionsText.match(
-    /Board\s+Id?\s+(?:is\s+)?[:=]?\s*([a-f0-9-]{36})/i
+    /Board\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*([a-f0-9-]{36})/i
   );
   if (boardIdMatch && uuidRegex.test(boardIdMatch[1])) {
     config.boardId = boardIdMatch[1];
@@ -48,7 +48,7 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
   // Extract stageId
   const stageIdMatch = instructionsText.match(
-    /Stage\s+Id?\s+(?:is\s+)?[:=]?\s*([a-f0-9-]{36})/i
+    /Stage\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*([a-f0-9-]{36})/i
   );
   if (stageIdMatch && uuidRegex.test(stageIdMatch[1])) {
     config.stageId = stageIdMatch[1];
@@ -59,7 +59,7 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
   // Extract dealId
   const dealIdMatch = instructionsText.match(
-    /Deal\s+id?\s+(?:is\s+)?[:=]?\s*(\d+)/i
+    /Deal\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*(\d+)/i
   );
   if (dealIdMatch) {
     config.dealId = parseInt(dealIdMatch[1], 10);
@@ -69,8 +69,9 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   }
 
   // Extract agentId
+  // Supports: "Agent ID is UUID", "Agent UUID", "Agent: UUID"
   const agentIdMatch = instructionsText.match(
-    /Agent\s+Id?\s+(?:is\s+)?[:=]?\s*([a-f0-9-]{36})/i
+    /Agent\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*([a-f0-9-]{36})/i
   );
   if (agentIdMatch && uuidRegex.test(agentIdMatch[1])) {
     config.agentId = agentIdMatch[1];
@@ -81,7 +82,7 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
   // Extract clientId
   const clientIdMatch = instructionsText.match(
-    /Client\s+Id?\s+(?:is\s+)?[:=]?\s*(\d+)/i
+    /Client\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*(\d+)/i
   );
   if (clientIdMatch) {
     config.clientId = parseInt(clientIdMatch[1], 10);
@@ -92,7 +93,7 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
   // Extract timezone
   const timezoneMatch = instructionsText.match(
-    /Timezone?\s+(?:is\s+)?[:=]?\s*([A-Za-z_/]+)/i
+    /Timezone\s*(?:is\b)?[:=]?\s*([A-Za-z_/]+)/i
   );
   if (timezoneMatch) {
     config.timezone = timezoneMatch[1];

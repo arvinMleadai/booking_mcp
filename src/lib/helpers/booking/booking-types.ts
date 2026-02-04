@@ -29,11 +29,19 @@ export interface BookingTimeSlot {
 
 export interface BookingRequest {
   // Required
-  instructionsText: string;
+  instructionsText?: string; // Made optional if IDs provided explicitly
   startDateTime: string;
   endDateTime: string;
 
-  // Optional - will be extracted from instructionsText
+  // Optional - explicit IDs from tool arguments
+  agentId?: string;
+  clientId?: number;
+  boardId?: string;
+  stageId?: string;
+  dealId?: number;
+  timezone?: string;
+
+  // Optional - will be merged with extracted IDs
   extractedIds?: BookingIds;
 
   // Optional - customer details
@@ -50,7 +58,16 @@ export interface BookingRequest {
 }
 
 export interface SlotSearchRequest {
-  instructionsText: string;
+  instructionsText?: string;
+  // Explicit IDs
+  agentId?: string;
+  clientId?: number;
+  boardId?: string;
+  stageId?: string;
+  dealId?: number;
+  timezone?: string;
+  extractedIds?: BookingIds; // For internal use
+
   preferredDate: string;
   durationMinutes?: number;
   maxSuggestions?: number;
@@ -58,7 +75,16 @@ export interface SlotSearchRequest {
 }
 
 export interface RescheduleRequest {
-  instructionsText: string;
+  instructionsText?: string;
+  // Explicit IDs
+  agentId?: string;
+  clientId?: number;
+  boardId?: string;
+  stageId?: string;
+  dealId?: number;
+  timezone?: string;
+  extractedIds?: BookingIds; // For internal use
+
   eventId: string;
   newStartDateTime: string;
   newEndDateTime: string;
@@ -67,7 +93,16 @@ export interface RescheduleRequest {
 }
 
 export interface CancelRequest {
-  instructionsText: string;
+  instructionsText?: string;
+  // Explicit IDs
+  agentId?: string;
+  clientId?: number;
+  boardId?: string;
+  stageId?: string;
+  dealId?: number;
+  timezone?: string;
+  extractedIds?: BookingIds; // For internal use
+
   eventId: string;
   calendarId?: string;
   notifyCustomer?: boolean;
