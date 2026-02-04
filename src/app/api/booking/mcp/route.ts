@@ -22,6 +22,7 @@ async function extractAndMergeBookingIds(
     dealId?: number | string;
     agentId?: string;
     clientId?: number | string;
+    timezone?: string;
   }
 ): Promise<{
   boardId?: string;
@@ -29,6 +30,7 @@ async function extractAndMergeBookingIds(
   dealId?: number;
   agentId?: string;
   clientId?: number;
+  timezone?: string;
   extractionResult?: ExtractBookingIdsResult;
 }> {
   console.log("📥 [extractAndMergeBookingIds] Called with:");
@@ -43,6 +45,7 @@ async function extractAndMergeBookingIds(
     dealId: providedIds.dealId,
     agentId: providedIds.agentId,
     clientId: providedIds.clientId,
+    timezone: providedIds.timezone,
   });
 
   const result = {
@@ -51,6 +54,7 @@ async function extractAndMergeBookingIds(
     dealId: providedIds.dealId ? (typeof providedIds.dealId === 'number' ? providedIds.dealId : parseInt(String(providedIds.dealId), 10)) : undefined,
     agentId: providedIds.agentId,
     clientId: providedIds.clientId ? (typeof providedIds.clientId === 'number' ? providedIds.clientId : parseInt(String(providedIds.clientId), 10)) : undefined,
+    timezone: providedIds.timezone,
     extractionResult: undefined as ExtractBookingIdsResult | undefined,
   };
 
@@ -60,10 +64,11 @@ async function extractAndMergeBookingIds(
     dealId: result.dealId,
     agentId: result.agentId,
     clientId: result.clientId,
+    timezone: result.timezone,
   });
 
   // Extract from instructionsText if provided and any IDs are missing
-  const shouldExtract = instructionsText && (!result.boardId || !result.stageId || !result.dealId || !result.agentId || !result.clientId);
+  const shouldExtract = instructionsText && (!result.boardId || !result.stageId || !result.dealId || !result.agentId || !result.clientId || !result.timezone);
   console.log("🔍 [extractAndMergeBookingIds] Should extract?", shouldExtract);
   console.log("  - instructionsText exists:", !!instructionsText);
   console.log("  - Missing IDs:", {
@@ -72,6 +77,7 @@ async function extractAndMergeBookingIds(
     dealId: !result.dealId,
     agentId: !result.agentId,
     clientId: !result.clientId,
+    timezone: !result.timezone,
   });
 
   if (shouldExtract) {
@@ -113,6 +119,10 @@ async function extractAndMergeBookingIds(
         if (!isNaN(result.clientId)) {
           console.log(`✅ Extracted clientId: ${result.clientId}`);
         }
+      }
+      if (!result.timezone && extracted.timezone) {
+        result.timezone = extracted.timezone;
+        console.log(`✅ Extracted timezone: ${result.timezone}`);
       }
     }
   }
@@ -774,6 +784,7 @@ REQUIRED: instructionsText parameter must be provided with the full booking inst
             extractedDealId: extractedIdsForSlots.dealId,
             extractedAgentId: extractedIdsForSlots.agentId,
             extractedClientId: extractedIdsForSlots.clientId,
+            extractedTimezone: extractedIdsForSlots.timezone,
           });
 
           const extractedBoardIdForSlots = extractedIdsForSlots.boardId;
