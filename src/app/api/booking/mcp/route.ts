@@ -662,7 +662,9 @@ const handler = createMcpHandler(
     server.registerTool(
       "FindAvailableBookingSlots",
       {
-        description: `Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times.`,
+        description: `Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times.
+
+REQUIRED: instructionsText parameter must be provided with the full booking instructions. The system will automatically extract boardId, stageId, and dealId from it. These IDs are necessary for calendar selection and customer lookup.`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -676,20 +678,20 @@ const handler = createMcpHandler(
             .uuid()
             .optional()
             .describe(
-              "Pipeline/board UUID. Required if present in booking instructions. Format: UUID string (e.g., 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'). Uses pipeline's calendar when agent has no calendar."
+              "Pipeline/board UUID. Will be extracted from instructionsText if not provided. Format: UUID string (e.g., 'b44305a9-9a2f-408c-b2d0-2a0b73fc3142'). Uses pipeline's calendar when agent has no calendar."
             ),
           stageId: z
             .string()
             .uuid()
             .optional()
             .describe(
-              "Pipeline stage UUID. Required if present in booking instructions. Format: UUID string (e.g., 'afac5248-59e5-41f4-b06c-01ea68d6af6a'). Used for calendar selection."
+              "Pipeline stage UUID. Will be extracted from instructionsText if not provided. Format: UUID string (e.g., 'afac5248-59e5-41f4-b06c-01ea68d6af6a'). Used for calendar selection."
             ),
           dealId: z
             .union([z.number(), z.string().transform(Number)])
             .optional()
             .describe(
-              "Deal ID (stage_items.id). Required if present in booking instructions. Format: number (e.g., 14588). Automatically fetches customer details."
+              "Deal ID (stage_items.id). Will be extracted from instructionsText if not provided. Format: number (e.g., 14588). Automatically fetches customer details."
             ),
           preferredDate: z
             .string()
@@ -716,9 +718,8 @@ const handler = createMcpHandler(
             ),
           instructionsText: z
             .string()
-            .optional()
             .describe(
-              "Full booking instructions text. If boardId, stageId, or dealId are missing, pass this parameter and the system will automatically extract all IDs. Example: 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588'"
+              "REQUIRED: Full booking instructions text containing boardId, stageId, and dealId. The system will automatically extract all IDs from this text. Example: 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588'"
             ),
         },
       },
@@ -789,12 +790,22 @@ const handler = createMcpHandler(
             if (!extractedDealIdForSlots) missingIds.push("dealId");
 
             console.error("❌ BLOCKED: Missing required IDs after extraction attempt.");
+            console.error("  - instructionsText was provided:", !!instructionsText);
+            console.error("  - instructionsText length:", instructionsText?.length ?? 0);
+            if (extractedIdsForSlots.extractionResult) {
+              console.error("  - Extraction result:", {
+                success: extractedIdsForSlots.extractionResult.success,
+                method: extractedIdsForSlots.extractionResult.method,
+                error: extractedIdsForSlots.extractionResult.error,
+                extracted: extractedIdsForSlots.extractionResult.config,
+              });
+            }
             
             return {
               content: [
                 {
                   type: "text",
-                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\nThis tool requires boardId, stageId, and dealId.\n\nTO FIX:\n1. Pass the instructionsText parameter with your full booking instructions - IDs will be extracted automatically\n2. OR extract the IDs manually from your booking instructions and pass them as parameters\n\nExample instructions format:\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588`,
+                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\nThis tool requires boardId, stageId, and dealId to be extracted from instructionsText.\n\nERROR DETAILS:\n- instructionsText provided: ${instructionsText ? 'Yes (' + instructionsText.length + ' chars)' : 'No'}\n${extractedIdsForSlots.extractionResult ? `- Extraction method: ${extractedIdsForSlots.extractionResult.method}\n- Extraction success: ${extractedIdsForSlots.extractionResult.success}\n${extractedIdsForSlots.extractionResult.error ? `- Extraction error: ${extractedIdsForSlots.extractionResult.error}\n` : ''}` : ''}\n\nTO FIX:\n1. Ensure instructionsText parameter is provided with your full booking instructions\n2. The instructionsText must contain lines like:\n   - Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n   - Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n   - Deal id is 14588\n\nExample instructionsText format:\n"Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588"`,
                 },
               ],
             };
