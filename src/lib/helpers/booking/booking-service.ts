@@ -176,6 +176,7 @@ export class BookingService {
           attendeeName: customerResult.customer?.name || request.customerInfo?.name,
           isOnlineMeeting: request.isOnlineMeeting ?? true,
         },
+        ids.agentId,
         calendarSelection.calendarId
       );
 
