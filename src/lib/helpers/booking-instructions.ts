@@ -167,7 +167,16 @@ export interface ExtractBookingIdsResult {
 export async function extractBookingIdsWithLLM(
   instructionsText: string
 ): Promise<ExtractBookingIdsResult> {
+  console.log('📥 [extractBookingIdsWithLLM] Function called');
+  console.log('  - instructionsText type:', typeof instructionsText);
+  console.log('  - instructionsText is undefined:', instructionsText === undefined);
+  console.log('  - instructionsText is null:', instructionsText === null);
+  console.log('  - instructionsText length:', instructionsText?.length ?? 0);
+  console.log('  - instructionsText trimmed length:', instructionsText?.trim().length ?? 0);
+  console.log('  - instructionsText value (first 500 chars):', instructionsText?.substring(0, 500) ?? 'N/A');
+  
   if (!instructionsText || instructionsText.trim().length === 0) {
+    console.log('❌ [extractBookingIdsWithLLM] No instructions text provided - returning error');
     return {
       success: false,
       config: {},
@@ -176,8 +185,9 @@ export async function extractBookingIdsWithLLM(
     };
   }
 
-  console.log('🔍 Using LLM API to extract booking IDs from instructions...');
-  console.log('📝 Instructions text length:', instructionsText?.length || 0);
+  console.log('🔍 [extractBookingIdsWithLLM] Using LLM API to extract booking IDs from instructions...');
+  console.log('📝 [extractBookingIdsWithLLM] Instructions text length:', instructionsText.length);
+  console.log('📝 [extractBookingIdsWithLLM] Full instructions text:', instructionsText);
 
   // Get API key from environment (support both Groq and OpenAI)
   const groqApiKey = process.env.GROQ_API_KEY;

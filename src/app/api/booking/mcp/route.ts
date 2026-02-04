@@ -31,6 +31,20 @@ async function extractAndMergeBookingIds(
   clientId?: number;
   extractionResult?: ExtractBookingIdsResult;
 }> {
+  console.log("📥 [extractAndMergeBookingIds] Called with:");
+  console.log("  - instructionsText type:", typeof instructionsText);
+  console.log("  - instructionsText is undefined:", instructionsText === undefined);
+  console.log("  - instructionsText is null:", instructionsText === null);
+  console.log("  - instructionsText length:", instructionsText?.length ?? 0);
+  console.log("  - instructionsText value (first 200 chars):", instructionsText?.substring(0, 200) ?? "N/A");
+  console.log("  - providedIds:", {
+    boardId: providedIds.boardId,
+    stageId: providedIds.stageId,
+    dealId: providedIds.dealId,
+    agentId: providedIds.agentId,
+    clientId: providedIds.clientId,
+  });
+
   const result = {
     boardId: providedIds.boardId,
     stageId: providedIds.stageId,
@@ -40,11 +54,37 @@ async function extractAndMergeBookingIds(
     extractionResult: undefined as ExtractBookingIdsResult | undefined,
   };
 
+  console.log("📊 [extractAndMergeBookingIds] Initial result state:", {
+    boardId: result.boardId,
+    stageId: result.stageId,
+    dealId: result.dealId,
+    agentId: result.agentId,
+    clientId: result.clientId,
+  });
+
   // Extract from instructionsText if provided and any IDs are missing
-  if (instructionsText && (!result.boardId || !result.stageId || !result.dealId || !result.agentId || !result.clientId)) {
-    console.log("🔍 Extracting IDs from instructionsText...");
-    const extractionResult = await extractBookingIdsWithLLM(instructionsText);
+  const shouldExtract = instructionsText && (!result.boardId || !result.stageId || !result.dealId || !result.agentId || !result.clientId);
+  console.log("🔍 [extractAndMergeBookingIds] Should extract?", shouldExtract);
+  console.log("  - instructionsText exists:", !!instructionsText);
+  console.log("  - Missing IDs:", {
+    boardId: !result.boardId,
+    stageId: !result.stageId,
+    dealId: !result.dealId,
+    agentId: !result.agentId,
+    clientId: !result.clientId,
+  });
+
+  if (shouldExtract) {
+    console.log("🔍 [extractAndMergeBookingIds] Calling extractBookingIdsWithLLM with instructionsText...");
+    console.log("  - Full instructionsText:", instructionsText);
+    const extractionResult = await extractBookingIdsWithLLM(instructionsText!);
     result.extractionResult = extractionResult;
+    console.log("📋 [extractAndMergeBookingIds] Extraction result:", {
+      success: extractionResult.success,
+      method: extractionResult.method,
+      error: extractionResult.error,
+      config: extractionResult.config,
+    });
     
     if (extractionResult.success) {
       const extracted = extractionResult.config;
@@ -376,7 +416,16 @@ const handler = createMcpHandler(
             instructionsText,
           } = args;
 
-          console.log("book customer appointment (Booking MCP)");
+          console.log("📞 [BookCustomerAppointment] Tool called");
+          console.log("📥 [BookCustomerAppointment] Raw args received:");
+          console.log("  - All args keys:", Object.keys(args));
+          console.log("  - instructionsText in args:", 'instructionsText' in args);
+          console.log("  - instructionsText value:", instructionsText);
+          console.log("  - instructionsText type:", typeof instructionsText);
+          console.log("  - instructionsText length:", instructionsText?.length ?? 0);
+          if (instructionsText) {
+            console.log("  - instructionsText preview (first 500 chars):", instructionsText.substring(0, 500));
+          }
           console.table(args);
           console.log("🔍 Raw args for debugging:", {
             boardId: args.boardId,
@@ -385,15 +434,24 @@ const handler = createMcpHandler(
             boardIdType: typeof args.boardId,
             stageIdType: typeof args.stageId,
             dealIdType: typeof args.dealId,
+            instructionsText: args.instructionsText ? `Present (${args.instructionsText.length} chars)` : 'Missing',
           });
 
           // Extract and merge IDs from instructionsText if provided
+          console.log("🔄 [BookCustomerAppointment] Calling extractAndMergeBookingIds...");
           const extractedIds = await extractAndMergeBookingIds(instructionsText, {
             boardId,
             stageId,
             dealId,
             agentId,
             clientId,
+          });
+          console.log("✅ [BookCustomerAppointment] Extraction complete:", {
+            extractedBoardId: extractedIds.boardId,
+            extractedStageId: extractedIds.stageId,
+            extractedDealId: extractedIds.dealId,
+            extractedAgentId: extractedIds.agentId,
+            extractedClientId: extractedIds.clientId,
           });
 
           const extractedBoardId = extractedIds.boardId;
@@ -679,7 +737,16 @@ const handler = createMcpHandler(
             instructionsText,
           } = args;
 
-          console.log("find available booking slots (Booking MCP)");
+          console.log("📞 [FindAvailableBookingSlots] Tool called");
+          console.log("📥 [FindAvailableBookingSlots] Raw args received:");
+          console.log("  - All args keys:", Object.keys(args));
+          console.log("  - instructionsText in args:", 'instructionsText' in args);
+          console.log("  - instructionsText value:", instructionsText);
+          console.log("  - instructionsText type:", typeof instructionsText);
+          console.log("  - instructionsText length:", instructionsText?.length ?? 0);
+          if (instructionsText) {
+            console.log("  - instructionsText preview (first 500 chars):", instructionsText.substring(0, 500));
+          }
           console.table(args);
           console.log("🔍 Raw args for FindAvailableBookingSlots:", {
             boardId: args.boardId,
@@ -688,15 +755,24 @@ const handler = createMcpHandler(
             boardIdType: typeof args.boardId,
             stageIdType: typeof args.stageId,
             dealIdType: typeof args.dealId,
+            instructionsText: args.instructionsText ? `Present (${args.instructionsText.length} chars)` : 'Missing',
           });
 
           // Extract and merge IDs from instructionsText if provided
+          console.log("🔄 [FindAvailableBookingSlots] Calling extractAndMergeBookingIds...");
           const extractedIdsForSlots = await extractAndMergeBookingIds(instructionsText, {
             boardId,
             stageId,
             dealId,
             agentId,
             clientId,
+          });
+          console.log("✅ [FindAvailableBookingSlots] Extraction complete:", {
+            extractedBoardId: extractedIdsForSlots.boardId,
+            extractedStageId: extractedIdsForSlots.stageId,
+            extractedDealId: extractedIdsForSlots.dealId,
+            extractedAgentId: extractedIdsForSlots.agentId,
+            extractedClientId: extractedIdsForSlots.clientId,
           });
 
           const extractedBoardIdForSlots = extractedIdsForSlots.boardId;
