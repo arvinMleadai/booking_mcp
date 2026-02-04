@@ -26,7 +26,7 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   if (!instructionsText || instructionsText.trim().length === 0) {
     return {};
   }
-
+  console.log('1. Instructions Text:', instructionsText);
   const config: BookingIds = {};
 
   // 0. Try to parse as JSON first (LLM sometimes sends JSON string)
@@ -35,6 +35,7 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[1]);
+      console.log('2. Instructions Text:', instructionsText);
       console.debug('✅ [extractBookingIds] Parsed JSON input:', parsed);
       
       // Map parsed fields to config
@@ -88,6 +89,7 @@ export function validateRequiredIds(
  * @returns Formatted instruction text
  */
 export function formatInstructionsText(ids: Required<BookingIds>): string {
+  console.log('3. Instructions Text:', ids);
   return `Agent ID is ${ids.agentId}
 Client ID is ${ids.clientId}
 Board Id is ${ids.boardId}

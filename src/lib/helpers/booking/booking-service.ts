@@ -267,6 +267,7 @@ export class BookingService {
           ...request.extractedIds,
         }
       );
+      console.log('Instructions Text:', request.instructionsText);
       if (!extractResult.valid || !extractResult.ids) {
         return {
           success: false,
@@ -274,7 +275,7 @@ export class BookingService {
           code: extractResult.code,
         };
       }
-      console.log('Instructions Text:', request.instructionsText);
+     
       const ids = extractResult.ids;
 
       // Get agent data
