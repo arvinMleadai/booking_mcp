@@ -30,9 +30,11 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   const config: BookingIds = {};
 
   // 0. Try to parse as JSON first (LLM sometimes sends JSON string)
-  if (instructionsText.trim().startsWith('{')) {
+  // Robust parsing: find the substring from first '{' to last '}'
+  const jsonMatch = instructionsText.match(/(\{[\s\S]*\})/);
+  if (jsonMatch) {
     try {
-      const parsed = JSON.parse(instructionsText);
+      const parsed = JSON.parse(jsonMatch[1]);
       console.debug('✅ [extractBookingIds] Parsed JSON input:', parsed);
       
       // Map parsed fields to config
@@ -45,85 +47,12 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
       return config;
     } catch (e) {
-      console.warn('⚠️ [extractBookingIds] JSON parse failed, falling back to regex:', e);
+      console.warn('⚠️ [extractBookingIds] JSON parse failed, no fallback to regex:', e);
     }
   }
 
-  // UUID pattern (36 characters with hyphens)
-  const uuidRegex = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
-
-  // Debug logging
-  console.log('📝 [extractBookingIds] Input text:', instructionsText);
-
-  // Extract boardId
-  const boardIdMatch = instructionsText.match(
-    /Board\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*([a-f0-9-]{36})/i
-  );
-  if (boardIdMatch && uuidRegex.test(boardIdMatch[1])) {
-    config.boardId = boardIdMatch[1];
-    console.debug('✅ [extractBookingIds] Found boardId:', config.boardId);
-  } else {
-    console.debug('❌ [extractBookingIds] boardId not found');
-  }
-
-  // Extract stageId
-  const stageIdMatch = instructionsText.match(
-    /Stage\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*([a-f0-9-]{36})/i
-  );
-  if (stageIdMatch && uuidRegex.test(stageIdMatch[1])) {
-    config.stageId = stageIdMatch[1];
-    console.debug('✅ [extractBookingIds] Found stageId:', config.stageId);
-  } else {
-    console.debug('❌ [extractBookingIds] stageId not found');
-  }
-
-  // Extract dealId
-  const dealIdMatch = instructionsText.match(
-    /Deal\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*(\d+)/i
-  );
-  if (dealIdMatch) {
-    config.dealId = parseInt(dealIdMatch[1], 10);
-    console.debug('✅ [extractBookingIds] Found dealId:', config.dealId);
-  } else {
-    console.debug('❌ [extractBookingIds] dealId not found');
-  }
-
-  // Extract agentId
-  // Supports: "Agent ID is UUID", "Agent UUID", "Agent: UUID"
-  const agentIdMatch = instructionsText.match(
-    /Agent\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*([a-f0-9-]{36})/i
-  );
-  if (agentIdMatch && uuidRegex.test(agentIdMatch[1])) {
-    config.agentId = agentIdMatch[1];
-    console.debug('✅ [extractBookingIds] Found agentId:', config.agentId);
-  } else {
-    console.debug('❌ [extractBookingIds] agentId not found');
-  }
-
-  // Extract clientId
-  const clientIdMatch = instructionsText.match(
-    /Client\s*(?:Id\b|ID\b)?\s*(?:is\b)?[:=]?\s*(\d+)/i
-  );
-  if (clientIdMatch) {
-    config.clientId = parseInt(clientIdMatch[1], 10);
-    console.debug('✅ [extractBookingIds] Found clientId:', config.clientId);
-  } else {
-    console.debug('❌ [extractBookingIds] clientId not found');
-  }
-
-  // Extract timezone
-  const timezoneMatch = instructionsText.match(
-    /Timezone\s*(?:is\b)?[:=]?\s*([A-Za-z_/]+)/i
-  );
-  if (timezoneMatch) {
-    config.timezone = timezoneMatch[1];
-    console.debug('✅ [extractBookingIds] Found timezone:', config.timezone);
-  } else {
-    console.debug('❌ [extractBookingIds] timezone not found');
-  }
-
-  console.log('📊 [extractBookingIds] Extraction result:', JSON.stringify(config, null, 2));
-
+  // No fallback regex support - strictly JSON only per user request.
+  // If JSON was not found or parsing failed, return the (potentially empty) config.
   return config;
 }
 

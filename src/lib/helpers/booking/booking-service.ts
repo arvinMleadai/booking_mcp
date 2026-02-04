@@ -274,7 +274,7 @@ export class BookingService {
           code: extractResult.code,
         };
       }
-
+      console.log('Instructions Text:', request.instructionsText);
       const ids = extractResult.ids;
 
       // Get agent data
