@@ -327,7 +327,7 @@ export class AdvancedCacheService {
     console.log(`💾 Cache MISS: Fetching calendar connection for client ${clientId}`)
     
     // Import here to avoid circular dependencies
-    const { getCalendarConnectionByClientId } = await import('../calendar_functions/graphDatabase')
+    const { getCalendarConnectionByClientId } = await import('../booking_functions/calendar/graphDatabase')
     connection = await getCalendarConnectionByClientId(clientId, preferredProvider)
     
     if (connection) {
@@ -357,7 +357,7 @@ export class AdvancedCacheService {
     console.log(`💾 Cache MISS: Fetching calendar connection for agent ${agentId}`)
     
     // Import here to avoid circular dependencies
-    const { getCalendarConnectionByAgentId } = await import('../calendar_functions/graphDatabase')
+    const { getCalendarConnectionByAgentId } = await import('../booking_functions/calendar/graphDatabase')
     connection = await getCalendarConnectionByAgentId(agentId, clientId, requiredProvider)
     
     if (connection) {
@@ -381,7 +381,7 @@ export class AdvancedCacheService {
 
     console.log(`💾 Cache MISS: Fetching client timezone for client ${clientId}`)
     
-    const { getClientTimezone } = await import('../calendar_functions/getClientTimeZone')
+    const { getClientTimezone } = await import('../booking_functions/calendar/getClientTimeZone')
     timezone = await getClientTimezone(clientId)
     
     if (timezone) {
