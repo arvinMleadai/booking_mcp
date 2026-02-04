@@ -29,6 +29,26 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
   const config: BookingIds = {};
 
+  // 0. Try to parse as JSON first (LLM sometimes sends JSON string)
+  if (instructionsText.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(instructionsText);
+      console.debug('✅ [extractBookingIds] Parsed JSON input:', parsed);
+      
+      // Map parsed fields to config
+      if (parsed.agentId) config.agentId = parsed.agentId;
+      if (parsed.clientId) config.clientId = typeof parsed.clientId === 'string' ? parseInt(parsed.clientId) : parsed.clientId;
+      if (parsed.boardId) config.boardId = parsed.boardId;
+      if (parsed.stageId) config.stageId = parsed.stageId;
+      if (parsed.dealId) config.dealId = typeof parsed.dealId === 'string' ? parseInt(parsed.dealId) : parsed.dealId;
+      if (parsed.timezone) config.timezone = parsed.timezone;
+
+      return config;
+    } catch (e) {
+      console.warn('⚠️ [extractBookingIds] JSON parse failed, falling back to regex:', e);
+    }
+  }
+
   // UUID pattern (36 characters with hyphens)
   const uuidRegex = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
 
