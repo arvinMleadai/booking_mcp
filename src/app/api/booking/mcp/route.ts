@@ -185,6 +185,8 @@ const handler = createMcpHandler((server) => {
           calendarId: args.calendarId,
         });
 
+        console.log('✅ [BookAppointment] Result:', JSON.stringify(result, null, 2));
+
         return {
           content: [
             {
@@ -263,6 +265,8 @@ const handler = createMcpHandler((server) => {
           calendarId: args.calendarId,
         });
 
+        console.log('✅ [FindAvailableSlots] Result:', JSON.stringify(result, null, 2));
+
         return {
           content: [
             {
@@ -330,6 +334,8 @@ const handler = createMcpHandler((server) => {
           calendarId: args.calendarId,
           notifyCustomer: args.notifyCustomer,
         });
+
+        console.log('✅ [CancelAppointment] Result:', JSON.stringify(result, null, 2));
 
         return {
           content: [
@@ -406,6 +412,8 @@ const handler = createMcpHandler((server) => {
           calendarId: args.calendarId,
           notifyCustomer: args.notifyCustomer,
         });
+
+        console.log('✅ [RescheduleAppointment] Result:', JSON.stringify(result, null, 2));
 
         return {
           content: [

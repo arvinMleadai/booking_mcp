@@ -84,6 +84,7 @@ export class BookingService {
 
       const ids = extractResult.ids;
       console.log('✅ IDs extracted:', ids);
+      console.log('✅ Instructions Text:', request.instructionsText);
 
       // Step 2: Validate time slot
       const timeValidation = validateTimeSlot({
@@ -561,6 +562,8 @@ export class BookingService {
     code?: ErrorCode;
     details?: Record<string, any>;
   } {
+    console.debug('🔍 [extractAndValidateIds] Inputs:', { textLength: instructionsText?.length, explicitIds });
+
     // 1. Extract from text if available
     const extractedIds = instructionsText ? extractBookingIds(instructionsText) : {};
 
@@ -569,11 +572,14 @@ export class BookingService {
       ...extractedIds,
       ...explicitIds,
     };
+    
+    console.debug('🧩 [extractAndValidateIds] Merged IDs:', mergedIds);
 
     // 3. Validate
     const validation = validateRequiredIds(mergedIds);
 
     if (!validation.valid) {
+      console.warn('❌ [extractAndValidateIds] Validation Failed:', validation.missing);
       return {
         valid: false,
         error: `Missing required IDs: ${validation.missing.join(', ')}`,
@@ -585,6 +591,7 @@ export class BookingService {
     // Type assertion after validation
     const validatedIds = mergedIds as Required<Pick<BookingIds, 'clientId' | 'agentId' | 'boardId' | 'stageId' | 'dealId'>>;
 
+    console.debug('✅ [extractAndValidateIds] Validation Success');
     return { valid: true, ids: validatedIds };
   }
 
