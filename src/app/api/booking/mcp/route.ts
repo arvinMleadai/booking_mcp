@@ -20,7 +20,6 @@ const handler = createMcpHandler((server) => {
     },
     async (args) => {
       try {
-        
         console.log('📋 [ListAgents] Called');
 
         // Extract IDs
@@ -381,6 +380,15 @@ const handler = createMcpHandler((server) => {
       }
     }
   );
+},
+{
+  serverInfo: {
+    name: 'booking-mcp-server',
+    version: '0.1.0',
+  }
+},
+{
+  basePath: '/api/booking',
 });
 
 // Export Next.js API routes
