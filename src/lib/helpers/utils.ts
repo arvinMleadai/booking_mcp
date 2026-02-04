@@ -495,7 +495,7 @@ export const validateAgentHasCalendar = async (
   if (calendarConnectionId) {
     console.log(`🎯 Board calendar specified (${calendarConnectionId}), checking connection...`);
     const { getCalendarConnectionById } = await import(
-      "./calendar_functions/graphDatabase"
+      "./booking_functions/calendar/graphDatabase"
     );
     const connection = await getCalendarConnectionById(
       calendarConnectionId,

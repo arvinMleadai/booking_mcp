@@ -3,7 +3,7 @@ import { createMcpHandler } from 'mcp-handler';
 import { BookingService } from '@/lib/helpers/booking/booking-service';
 import { extractBookingIds } from '@/lib/helpers/booking/booking-extractor';
 import { getAgentsForClient } from '@/lib/helpers/utils';
-import { getCalendarConnectionByPipelineId } from '@/lib/helpers/calendar_functions/graphDatabase';
+import { getCalendarConnectionByPipelineId } from '@/lib/helpers/booking_functions/calendar/graphDatabase';
 
 
 const handler = createMcpHandler((server) => {

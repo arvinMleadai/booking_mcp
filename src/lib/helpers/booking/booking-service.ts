@@ -45,8 +45,8 @@ import {
   getPipelineById,
   getPartyContactInfo,
 } from '../booking_functions/bookingMetadata';
-import { CalendarService } from '../calendar_functions/calendar-service';
-import { getCalendarConnectionByPipelineId } from '../calendar_functions/graphDatabase';
+import { CalendarService } from '../booking_functions/calendar/calendar-service';
+import { getCalendarConnectionByPipelineId } from '../booking_functions/calendar/graphDatabase';
 
 
 export class BookingService {

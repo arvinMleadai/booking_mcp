@@ -1,7 +1,7 @@
 // Optimized conflict detection with smart algorithms and caching
 import type { GraphCalendarConnection } from '@/types'
-import { AdvancedCacheService } from '../cache/advancedCacheService'
-import { isWithinOfficeHours } from '../utils'
+import { AdvancedCacheService } from '../../cache/advancedCacheService'
+import { isWithinOfficeHours } from '../../utils'
 import { DateTime } from 'luxon'
 import { CalendarService } from './calendar-service'
 

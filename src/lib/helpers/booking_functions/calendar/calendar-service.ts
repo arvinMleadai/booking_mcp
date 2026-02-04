@@ -9,7 +9,7 @@ import type {
   GetEventsRequest,
   GetAvailabilityRequest,
 } from './providers/types'
-import { AdvancedCacheService } from '../cache/advancedCacheService'
+import { AdvancedCacheService } from '../../cache/advancedCacheService'
 import {
   getCalendarConnectionByAgentId,
   getCalendarConnectionByClientId,
