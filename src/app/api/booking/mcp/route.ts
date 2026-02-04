@@ -20,6 +20,7 @@ const handler = createMcpHandler((server) => {
     },
     async (args) => {
       try {
+        
         console.log('📋 [ListAgents] Called');
 
         // Extract IDs
