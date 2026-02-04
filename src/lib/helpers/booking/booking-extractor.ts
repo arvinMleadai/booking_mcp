@@ -32,12 +32,18 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   // UUID pattern (36 characters with hyphens)
   const uuidRegex = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
 
+  // Debug logging
+  console.log('📝 [extractBookingIds] Input text:', instructionsText);
+
   // Extract boardId
   const boardIdMatch = instructionsText.match(
     /Board\s+Id?\s+(?:is\s+)?[:=]?\s*([a-f0-9-]{36})/i
   );
   if (boardIdMatch && uuidRegex.test(boardIdMatch[1])) {
     config.boardId = boardIdMatch[1];
+    console.debug('✅ [extractBookingIds] Found boardId:', config.boardId);
+  } else {
+    console.debug('❌ [extractBookingIds] boardId not found');
   }
 
   // Extract stageId
@@ -46,6 +52,9 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   );
   if (stageIdMatch && uuidRegex.test(stageIdMatch[1])) {
     config.stageId = stageIdMatch[1];
+    console.debug('✅ [extractBookingIds] Found stageId:', config.stageId);
+  } else {
+    console.debug('❌ [extractBookingIds] stageId not found');
   }
 
   // Extract dealId
@@ -54,6 +63,9 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   );
   if (dealIdMatch) {
     config.dealId = parseInt(dealIdMatch[1], 10);
+    console.debug('✅ [extractBookingIds] Found dealId:', config.dealId);
+  } else {
+    console.debug('❌ [extractBookingIds] dealId not found');
   }
 
   // Extract agentId
@@ -62,6 +74,9 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   );
   if (agentIdMatch && uuidRegex.test(agentIdMatch[1])) {
     config.agentId = agentIdMatch[1];
+    console.debug('✅ [extractBookingIds] Found agentId:', config.agentId);
+  } else {
+    console.debug('❌ [extractBookingIds] agentId not found');
   }
 
   // Extract clientId
@@ -70,6 +85,9 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   );
   if (clientIdMatch) {
     config.clientId = parseInt(clientIdMatch[1], 10);
+    console.debug('✅ [extractBookingIds] Found clientId:', config.clientId);
+  } else {
+    console.debug('❌ [extractBookingIds] clientId not found');
   }
 
   // Extract timezone
@@ -78,7 +96,12 @@ export function extractBookingIds(instructionsText: string): BookingIds {
   );
   if (timezoneMatch) {
     config.timezone = timezoneMatch[1];
+    console.debug('✅ [extractBookingIds] Found timezone:', config.timezone);
+  } else {
+    console.debug('❌ [extractBookingIds] timezone not found');
   }
+
+  console.log('📊 [extractBookingIds] Extraction result:', JSON.stringify(config, null, 2));
 
   return config;
 }
