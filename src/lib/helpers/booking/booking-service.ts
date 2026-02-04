@@ -567,10 +567,14 @@ export class BookingService {
     // 1. Extract from text if available
     const extractedIds = instructionsText ? extractBookingIds(instructionsText) : {};
 
-    // 2. Merge with explicit IDs (explicit takes precedence)
+    // 2. Merge with explicit IDs (explicit takes precedence, but ignore undefined)
+    const cleanExplicitIds = Object.fromEntries(
+      Object.entries(explicitIds || {}).filter(([_, v]) => v !== undefined && v !== null && v !== '')
+    );
+
     const mergedIds: BookingIds = {
       ...extractedIds,
-      ...explicitIds,
+      ...cleanExplicitIds,
     };
     
     console.debug('🧩 [extractAndValidateIds] Merged IDs:', mergedIds);
