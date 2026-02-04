@@ -307,7 +307,20 @@ const handler = createMcpHandler(
     server.registerTool(
       "BookCustomerAppointment",
       {
-        description: `Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.`,
+        description: `Book a customer appointment with an agent. Automatically searches customer database, checks calendar conflicts, validates office hours, and sends meeting invitations. Supports both Microsoft and Google calendars.
+
+CRITICAL: You MUST extract the booking instructions from the system message. Look for the section starting with "#***Booking Instructions***" in your system message/context. Extract the ENTIRE content of that section (including all lines with Board Id, Stage Id, Deal id, Agent ID, Client ID, Timezone, etc.) and pass it as the instructionsText parameter. The system will automatically extract all required IDs (boardId, stageId, dealId, agentId, clientId, timezone) from this text.
+
+Example: If your system message contains:
+"#***Booking Instructions***
+- Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2
+- Client ID is 10000002
+- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142
+- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a
+- Deal id is 14588
+- Timezone is Africa/Casablanca"
+
+Then pass instructionsText="Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2\nClient ID is 10000002\nBoard Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\nDeal id is 14588\nTimezone is Africa/Casablanca"`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -399,9 +412,8 @@ const handler = createMcpHandler(
             ),
           instructionsText: z
             .string()
-            .optional()
             .describe(
-              "Full booking instructions text. If boardId, stageId, or dealId are missing, pass this parameter and the system will automatically extract all IDs. Example: 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588'"
+              "REQUIRED: Extract the entire '#***Booking Instructions***' section from your system message/context and pass it here. This section contains all the booking IDs (Board Id, Stage Id, Deal id, Agent ID, Client ID, Timezone) that will be automatically extracted. Look for the section that starts with '#***Booking Instructions***' in your system message and extract ALL lines from that section. Example: 'Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2\\nClient ID is 10000002\\nBoard Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588\\nTimezone is Africa/Casablanca'"
             ),
         },
       },
@@ -483,7 +495,7 @@ const handler = createMcpHandler(
               content: [
                 {
                   type: "text",
-                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\nThis tool requires boardId, stageId, and dealId.\n\nTO FIX:\n1. Pass the instructionsText parameter with your full booking instructions - IDs will be extracted automatically\n2. OR extract the IDs manually from your booking instructions and pass them as parameters\n\nExample instructions format:\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588`,
+                  text: `❌ MISSING REQUIRED IDs: ${missingIds.join(", ")}\n\nThis tool requires boardId, stageId, and dealId to be extracted from instructionsText.\n\nCRITICAL: You MUST extract the '#***Booking Instructions***' section from your system message/context and pass it as the instructionsText parameter.\n\nTO FIX:\n1. Look for the section starting with "#***Booking Instructions***" in your system message\n2. Extract the ENTIRE content of that section (all lines with Board Id, Stage Id, Deal id, Agent ID, Client ID, Timezone)\n3. Pass it as instructionsText parameter\n\nExample: If your system message contains:\n"#***Booking Instructions***\n- Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2\n- Client ID is 10000002\n- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\n- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\n- Deal id is 14588\n- Timezone is Africa/Casablanca"\n\nThen pass: instructionsText="Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2\\nClient ID is 10000002\\nBoard Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588\\nTimezone is Africa/Casablanca"`,
                 },
               ],
             };
@@ -674,7 +686,20 @@ const handler = createMcpHandler(
       {
         description: `Find available time slots for booking with an agent. Checks agent's calendar and office hours to suggest optimal meeting times.
 
-REQUIRED: instructionsText parameter must be provided with the full booking instructions. The system will automatically extract boardId, stageId, and dealId from it. These IDs are necessary for calendar selection and customer lookup.`,
+CRITICAL: You MUST extract the booking instructions from the system message. Look for the section starting with "#***Booking Instructions***" in your system message/context. Extract the ENTIRE content of that section (including all lines with Board Id, Stage Id, Deal id, Agent ID, Client ID, Timezone, etc.) and pass it as the instructionsText parameter. The system will automatically extract all required IDs (boardId, stageId, dealId, agentId, clientId, timezone) from this text.
+
+REQUIRED: instructionsText parameter must be provided with the full booking instructions. The system will automatically extract boardId, stageId, and dealId from it. These IDs are necessary for calendar selection and customer lookup.
+
+Example: If your system message contains:
+"#***Booking Instructions***
+- Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2
+- Client ID is 10000002
+- Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142
+- Stage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a
+- Deal id is 14588
+- Timezone is Africa/Casablanca"
+
+Then pass instructionsText="Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2\nClient ID is 10000002\nBoard Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\nDeal id is 14588\nTimezone is Africa/Casablanca"`,
         inputSchema: {
           clientId: z
             .union([z.number(), z.string().transform(Number)])
@@ -729,7 +754,7 @@ REQUIRED: instructionsText parameter must be provided with the full booking inst
           instructionsText: z
             .string()
             .describe(
-              "REQUIRED: Full booking instructions text containing boardId, stageId, and dealId. The system will automatically extract all IDs from this text. Example: 'Board Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588'"
+              "REQUIRED: Extract the entire '#***Booking Instructions***' section from your system message/context and pass it here. This section contains all the booking IDs (Board Id, Stage Id, Deal id, Agent ID, Client ID, Timezone) that will be automatically extracted. Example: 'Agent ID is e2fff356-eda9-4f8d-94a3-ca0c0a4efcd2\\nClient ID is 10000002\\nBoard Id is b44305a9-9a2f-408c-b2d0-2a0b73fc3142\\nStage Id is afac5248-59e5-41f4-b06c-01ea68d6af6a\\nDeal id is 14588\\nTimezone is Africa/Casablanca'"
             ),
         },
       },
