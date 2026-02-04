@@ -231,7 +231,7 @@ export class EnhancedErrorHandler {
    * Get cached data as fallback
    */
   private static async getCachedFallback<T>(context: ErrorContext): Promise<T> {
-    const { AdvancedCacheService } = await import('../cache/advancedCacheService')
+    const { AdvancedCacheService } = await import('../../cache/advancedCacheService')
     
     if (context.operation.includes('events') && context.clientId) {
       // Try to get cached events
