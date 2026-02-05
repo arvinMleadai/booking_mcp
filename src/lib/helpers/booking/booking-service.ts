@@ -692,6 +692,14 @@ export class BookingService {
       if (!agent) return null;
 
       const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
+      
+      console.log('🔍 [getAgentData] Profile data:', {
+        hasProfile: !!profile,
+        profileName: profile?.name,
+        agentName: agent.name,
+        willUse: profile?.name || agent.name,
+        profileFull: profile,
+      });
 
       return {
         uuid: agent.uuid,
