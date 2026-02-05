@@ -47,11 +47,11 @@ const handler = createMcpHandler((server) => {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
+                text: `<json>${JSON.stringify({
                   success: false,
                   error: 'No agents found',
                   clientId: ids.clientId,
-                }),
+                })}</json>`,
               },
             ],
           };
@@ -96,12 +96,12 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
+              text: `<json>${JSON.stringify({
                 success: true,
                 agents,
                 clientId: ids.clientId,
                 totalAgents: agents.length,
-              }),
+              })}</json>`,
             },
           ],
         };
@@ -111,11 +111,11 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
+              text: `<json>${JSON.stringify({
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-              }),
+              })}</json>`,
             },
           ],
         };
@@ -191,7 +191,7 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -201,11 +201,11 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
+              text: `<json>${JSON.stringify({
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-              }),
+              })}</json>`,
             },
           ],
         };
@@ -271,7 +271,7 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -281,11 +281,11 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
+              text: `<json>${JSON.stringify({
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-              }),
+              })}</json>`,
             },
           ],
         };
@@ -341,7 +341,7 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -351,11 +351,11 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
+              text: `<json>${JSON.stringify({
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-              }),
+              })}</json>`,
             },
           ],
         };
@@ -419,7 +419,7 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -429,11 +429,11 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
+              text: `<json>${JSON.stringify({
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-              }),
+              })}</json>`,
             },
           ],
         };
