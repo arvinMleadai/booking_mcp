@@ -60,13 +60,18 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 /**
  * Validate that required booking IDs are present
  * 
+ * For INBOUND calls: Only clientId and agentId are required
+ * For OUTBOUND calls: All IDs (boardId, stageId, dealId) are typically present but not strictly required
+ * 
  * @param ids - Extracted booking IDs
  * @returns Validation result with missing IDs if any
  */
 export function validateRequiredIds(
   ids: BookingIds
 ): { valid: boolean; missing: string[] } {
-  const required = ['clientId', 'agentId', 'boardId', 'stageId', 'dealId'] as const;
+  // Only clientId and agentId are ESSENTIAL for booking
+  // boardId, stageId, dealId are optional (only available for outbound calls)
+  const required = ['clientId', 'agentId'] as const;
   const missing: string[] = [];
 
   for (const field of required) {

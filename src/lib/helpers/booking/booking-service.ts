@@ -106,8 +106,8 @@ export class BookingService {
         };
       }
 
-      // Step 3: Lookup customer
-      const customerResult = await this.lookupCustomer(ids.dealId, ids.clientId, request.customerInfo);
+      // Step 3: Lookup customer (dealId is optional for inbound calls)
+      const customerResult = await this.lookupCustomer(ids.dealId ?? null, ids.clientId, request.customerInfo);
       if (!customerResult.found && !request.customerInfo?.email) {
         return {
           success: false,
@@ -128,10 +128,10 @@ export class BookingService {
       }
       console.log('✅ Agent found:', agent.profileName);
 
-      // Step 5: Select calendar (agent → pipeline → explicit)
+      // Step 5: Select calendar (boardId is optional for inbound calls)
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
-        ids.boardId,
+        ids.boardId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -161,10 +161,10 @@ export class BookingService {
         }
       }
 
-      // Step 7: Generate subject
+      // Step 7: Generate subject (stageId and dealId are optional for inbound calls)
       const subject = await this.generateSubject(
-        ids.stageId,
-        ids.dealId,
+        ids.stageId ?? null,
+        ids.dealId ?? null,
         request.subject
       );
 
@@ -297,7 +297,7 @@ export class BookingService {
       // Select calendar
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
-        ids.boardId,
+        ids.boardId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -392,7 +392,7 @@ export class BookingService {
       // Select calendar
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
-        ids.boardId,
+        ids.boardId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -499,7 +499,7 @@ export class BookingService {
       // Select calendar
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
-        ids.boardId,
+        ids.boardId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -565,7 +565,7 @@ export class BookingService {
     explicitIds?: Partial<BookingIds>
   ): {
     valid: boolean;
-    ids?: Required<Pick<BookingIds, 'clientId' | 'agentId' | 'boardId' | 'stageId' | 'dealId'>>;
+    ids?: Required<Pick<BookingIds, 'clientId' | 'agentId'>> & Pick<BookingIds, 'boardId' | 'stageId' | 'dealId' | 'timezone'>;
     error?: string;
     code?: ErrorCode;
     details?: Record<string, any>;
@@ -600,8 +600,12 @@ export class BookingService {
       };
     }
 
+
     // Type assertion after validation
-    const validatedIds = mergedIds as Required<Pick<BookingIds, 'clientId' | 'agentId' | 'boardId' | 'stageId' | 'dealId'>>;
+    // Only clientId and agentId are guaranteed to be present
+    // boardId, stageId, dealId are optional (for inbound calls, they won't be available)
+    const validatedIds = mergedIds as Required<Pick<BookingIds, 'clientId' | 'agentId'>> & Pick<BookingIds, 'boardId' | 'stageId' | 'dealId' | 'timezone'>;
+
 
     console.debug('✅ [extractAndValidateIds] Validation Success');
     return { valid: true, ids: validatedIds };
@@ -609,9 +613,10 @@ export class BookingService {
 
   /**
    * Lookup customer from multiple sources
+   * dealId is optional - only available for outbound calls
    */
   private static async lookupCustomer(
-    dealId: number,
+    dealId: number | null,
     clientId: number,
     manualInfo?: { name?: string; email?: string; phoneNumber?: string }
   ): Promise<{ found: boolean; customer?: BookingCustomer }> {
@@ -766,10 +771,11 @@ export class BookingService {
 
   /**
    * Select calendar based on priority: explicit → pipeline → agent
+   * boardId is optional - only available for outbound calls
    */
   private static async selectCalendar(
     agentId: string,
-    boardId: string,
+    boardId: string | null,
     clientId: number,
     explicitCalendarId?: string
   ): Promise<CalendarSelection | null> {
@@ -818,10 +824,11 @@ export class BookingService {
 
   /**
    * Generate appointment subject from stage/deal metadata
+   * stageId and dealId are optional - only available for outbound calls
    */
   private static async generateSubject(
-    stageId: string,
-    dealId: number,
+    stageId: string | null,
+    dealId: number | null,
     manualSubject?: string
   ): Promise<string> {
     if (manualSubject) return manualSubject;
