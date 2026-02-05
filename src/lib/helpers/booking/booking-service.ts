@@ -39,6 +39,12 @@ import {
   getCustomerWithFuzzySearch,
   getContactWithFuzzySearch,
 } from '../utils';
+import { createClient } from '@supabase/supabase-js';
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
 import {
   getStageItemById,
   getPipelineStageById,
@@ -112,7 +118,7 @@ export class BookingService {
       console.log('✅ Customer found:', customerResult.customer);
 
       // Step 4: Get agent with calendar
-      const agent = await this.getAgentData(ids.agentId, ids.clientId);
+      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
       if (!agent) {
         return {
           success: false,
@@ -279,7 +285,7 @@ export class BookingService {
       const ids = extractResult.ids;
 
       // Get agent data
-      const agent = await this.getAgentData(ids.agentId, ids.clientId);
+      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
       if (!agent) {
         return {
           success: false,
@@ -474,7 +480,7 @@ export class BookingService {
       }
 
       // Get agent for office hours validation
-      const agent = await this.getAgentData(ids.agentId, ids.clientId);
+      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
       if (agent?.officeHours && agent?.timezone) {
         const hoursValidation = validateOfficeHours(
           request.newStartDateTime,
@@ -682,33 +688,75 @@ export class BookingService {
 
   /**
    * Get agent data with calendar and office hours
+   * If stageId is provided, use the stage's profile instead of agent's default profile
    */
   private static async getAgentData(
     agentId: string,
-    clientId: number
+    clientId: number,
+    stageId?: string
   ): Promise<BookingAgent & { officeHours?: any; timezone?: string } | null> {
     try {
       const agent = await getAgentWithCalendarByUUID(agentId, clientId);
       if (!agent) return null;
 
-      const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
+      // If stageId is provided, fetch the profile from the pipeline stage
+      // Otherwise, fall back to the agent's default profile
+      let profileData: { id: number; name: string; office_hours: any; timezone: string } | undefined;
+      
+      if (stageId) {
+        console.log(`🔍 [getAgentData] Fetching profile from stage: ${stageId}`);
+        const { data: stage, error: stageError } = await supabase
+          .schema('public')
+          .from('pipeline_stages')
+          .select('profile_id')
+          .eq('id', stageId)
+          .is('deleted_at', null)
+          .single();
+
+        if (stageError) {
+          console.warn(`⚠️ [getAgentData] Could not fetch stage ${stageId}:`, stageError);
+        } else if (stage?.profile_id) {
+          console.log(`✅ [getAgentData] Stage has profile_id: ${stage.profile_id}`);
+          const { data: profile, error: profileError } = await supabase
+            .schema('public')
+            .from('profiles')
+            .select('id, name, office_hours, timezone')
+            .eq('id', stage.profile_id)
+            .single();
+
+          if (!profileError && profile) {
+            profileData = profile;
+            console.log(`✅ [getAgentData] Fetched profile from stage:`, profile.name);
+          } else {
+            console.warn(`⚠️ [getAgentData] Profile not found for profile_id: ${stage.profile_id}`, profileError);
+          }
+        } else {
+          console.log(`ℹ️ [getAgentData] Stage ${stageId} has no profile_id set`);
+        }
+      }
+      
+      // Fall back to agent's profile if no stage profile was found
+      if (!profileData && agent.profiles) {
+        profileData = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
+        console.log(`ℹ️ [getAgentData] Using agent's default profile:`, profileData?.name);
+      }
       
       console.log('🔍 [getAgentData] Profile data:', {
-        hasProfile: !!profile,
-        profileName: profile?.name,
+        hasProfile: !!profileData,
+        profileName: profileData?.name,
         agentName: agent.name,
-        willUse: profile?.name || agent.name,
-        profileFull: profile,
+        willUse: profileData?.name || agent.name,
+        profileFull: profileData,
       });
 
       return {
         uuid: agent.uuid,
         name: agent.name,
-        profileName: profile?.name || agent.name,
+        profileName: profileData?.name || agent.name,
         title: agent.title || '',
         email: (agent.calendar_assignment?.calendar_connections as any)?.email,
-        officeHours: profile?.office_hours,
-        timezone: profile?.timezone,
+        officeHours: profileData?.office_hours,
+        timezone: profileData?.timezone,
       };
     } catch (error) {
       console.error('Error getting agent data:', error);
