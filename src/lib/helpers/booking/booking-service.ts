@@ -53,6 +53,8 @@ import {
 } from '../booking_functions/bookingMetadata';
 import { CalendarService } from '../booking_functions/calendar/calendar-service';
 import { getCalendarConnectionByPipelineId } from '../booking_functions/calendar/graphDatabase';
+import { sendSMS } from 'lead-ai-npm-modules';
+
 
 
 export class BookingService {
@@ -211,7 +213,17 @@ export class BookingService {
         };
       }
 
-      // Step 10: Return success
+      // Step 10: Send SMS confirmation
+      const customerPhone = customerResult.customer?.phoneNumber || request.customerInfo?.phoneNumber;
+      const formattedStart = DateTime.fromISO(request.startDateTime, { zone: agent.timezone || 'UTC' })
+        .toLocaleString(DateTime.DATETIME_FULL);
+      const meetingLink = eventResult.event?.onlineMeetingUrl;
+      
+      const smsMessage = `Your appointment with ${agent.profileName} has been confirmed for ${formattedStart}.${meetingLink ? `\n\nJoin here: ${meetingLink}` : ''}\n\nPowered By: LeadAi`;
+      
+      await this.sendSMSNotification(customerPhone, smsMessage, 'appointment booking');
+
+      // Step 11: Return success
       return {
         success: true,
         booking: {
@@ -419,6 +431,19 @@ export class BookingService {
         };
       }
 
+      // Send SMS notification if customer info available
+      if (ids.dealId) {
+        const customerResult = await this.lookupCustomer(ids.dealId, ids.clientId);
+        const customerPhone = customerResult.customer?.phoneNumber;
+        const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
+        
+        if (customerPhone && agent) {
+          const smsMessage = `Your appointment with ${agent.profileName} has been cancelled. Please contact us if you need to reschedule.\n\nPowered By: LeadAi`;
+          
+          await this.sendSMSNotification(customerPhone, smsMessage, 'appointment cancellation');
+        }
+      }
+
       return {
         success: true,
         eventId: request.eventId,
@@ -528,6 +553,22 @@ export class BookingService {
           error: updateResult.error || 'Reschedule failed',
           code: 'API_ERROR' as ErrorCode,
         };
+      }
+
+      // Send SMS notification if customer info available
+      if (ids.dealId) {
+        const customerResult = await this.lookupCustomer(ids.dealId, ids.clientId);
+        const customerPhone = customerResult.customer?.phoneNumber;
+        
+        if (customerPhone && agent) {
+          const formattedStart = DateTime.fromISO(request.newStartDateTime, { zone: agent.timezone || 'UTC' })
+            .toLocaleString(DateTime.DATETIME_FULL);
+          const meetingLink = updateResult.event?.onlineMeetingUrl;
+          
+          const smsMessage = `Your appointment with ${agent.profileName} has been rescheduled to ${formattedStart}.${meetingLink ? `\n\nJoin here: ${meetingLink}` : ''}\n\nPowered By: LeadAi`;
+          
+          await this.sendSMSNotification(customerPhone, smsMessage, 'appointment reschedule');
+        }
       }
 
       return {
@@ -844,6 +885,41 @@ export class BookingService {
       return 'Customer Appointment';
     } catch (error) {
       return 'Customer Appointment';
+    }
+  }
+
+  /**
+   * Send SMS notification to customer
+   * Handles errors gracefully - SMS failures don't break booking flow
+   */
+  private static async sendSMSNotification(
+    phoneNumber: string | undefined,
+    message: string,
+    context: string
+  ): Promise<void> {
+    // Validate phone number exists
+    if (!phoneNumber) {
+      console.log(`ℹ️ [sendSMSNotification] Skipping SMS for ${context}: No phone number provided`);
+      return;
+    }
+
+    // Validate API key exists
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    if (!telnyxApiKey) {
+      console.warn('⚠️ [sendSMSNotification] TELNYX_API_KEY not configured - SMS disabled');
+      return;
+    }
+
+    try {
+      console.log(`📱 [sendSMSNotification] Sending SMS for ${context} to ${phoneNumber}`);
+      
+      await sendSMS(phoneNumber, message, telnyxApiKey);
+      
+      console.log(`✅ [sendSMSNotification] SMS sent successfully for ${context}`);
+    } catch (error) {
+      // Log error but don't throw - SMS failures shouldn't break bookings
+      console.error(`❌ [sendSMSNotification] Failed to send SMS for ${context}:`, error);
+      console.error('SMS failure is non-critical - booking continues');
     }
   }
 }
