@@ -99,11 +99,15 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
       throw new Error('No refresh token available')
     }
 
-    // Validate refresh token format
-    if (!isValidJWT(connection.refresh_token)) {
-      console.error('❌ Invalid refresh token format. Cannot refresh access token.')
-      throw new Error('Invalid refresh token format. Please reconnect the calendar.')
+
+    // NOTE: Microsoft refresh tokens can be either JWTs or opaque tokens
+    // So we should NOT validate JWT format for refresh tokens
+    // Just check if the refresh token exists and is a non-empty string
+    if (typeof connection.refresh_token !== 'string' || connection.refresh_token.trim().length === 0) {
+      console.error('❌ Invalid refresh token: empty or not a string')
+      throw new Error('Invalid refresh token. Please reconnect the calendar.')
     }
+
 
     // Use existing refresh_token to get new access_token
     // No OAuth flow - just token refresh
@@ -125,6 +129,15 @@ export async function refreshGraphToken(connection: GraphCalendarConnection): Pr
       const error = await response.json()
       const errorMessage = `Token refresh failed: ${error.error_description || error.error}`
       console.error('❌', errorMessage)
+      console.error('🔍 Debug Info:', {
+        connectionId: connection.id,
+        email: connection.email,
+        provider: connection.provider_name,
+        refreshTokenPreview: connection.refresh_token?.substring(0, 50) + '...',
+        refreshTokenLength: connection.refresh_token?.length,
+        errorCode: error.error,
+        errorDescription: error.error_description,
+      })
       throw new Error(errorMessage)
     }
 
