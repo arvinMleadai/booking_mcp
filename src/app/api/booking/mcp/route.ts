@@ -132,8 +132,7 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .optional()
-        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+        .describe('REQUIRED: Booking instructions containing all IDs in JSON format. Example: {"clientId":"52","agentId":"uuid","boardId":"uuid","stageId":"uuid","dealId":"123","timezone":"Australia/Perth"}'),
       agentId: z.string().optional().describe('Agent UUID'),
       clientId: z.number().optional().describe('Client ID'),
       boardId: z.string().optional().describe('Board UUID'),
@@ -222,8 +221,7 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .optional()
-        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+        .describe('REQUIRED: Booking instructions containing all IDs in JSON format. Example: {"clientId":"52","agentId":"uuid","boardId":"uuid","stageId":"uuid","dealId":"123","timezone":"Australia/Perth"}'),
       agentId: z.string().optional().describe('Agent UUID'),
       clientId: z.number().optional().describe('Client ID'),
       boardId: z.string().optional().describe('Board UUID'),
@@ -302,8 +300,7 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .optional()
-        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+        .describe('REQUIRED: Booking instructions containing all IDs in JSON format. Example: {"clientId":"52","agentId":"uuid","boardId":"uuid","stageId":"uuid","dealId":"123","timezone":"Australia/Perth"}'),
       agentId: z.string().optional().describe('Agent UUID'),
       clientId: z.number().optional().describe('Client ID'),
       boardId: z.string().optional().describe('Board UUID'),
@@ -372,8 +369,7 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .optional()
-        .describe('Booking instructions from VAPI containing all IDs (optional if IDs provided explicitly)'),
+        .describe('REQUIRED: Booking instructions containing all IDs in JSON format. Example: {"clientId":"52","agentId":"uuid","boardId":"uuid","stageId":"uuid","dealId":"123","timezone":"Australia/Perth"}'),
       agentId: z.string().optional().describe('Agent UUID'),
       clientId: z.number().optional().describe('Client ID'),
       boardId: z.string().optional().describe('Board UUID'),
