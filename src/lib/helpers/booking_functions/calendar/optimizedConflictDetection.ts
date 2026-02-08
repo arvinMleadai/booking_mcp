@@ -90,14 +90,16 @@ export class OptimizedConflictDetection {
         dateKey,
         async () => {
           // Fetch entire day to avoid timezone conversion issues
-          // Get start of day (00:00) and end of day (23:59)
-          const dayStart = new Date(requestedStart)
-          dayStart.setHours(0, 0, 0, 0)
+          // Calculate day boundaries in CLIENT timezone, not server timezone
+          const requestedDateTime = DateTime.fromJSDate(requestedStart).setZone(timeZone);
+          const dayStartInClientTZ = requestedDateTime.startOf('day');
+          const dayEndInClientTZ = requestedDateTime.endOf('day');
           
-          const dayEnd = new Date(requestedStart)
-          dayEnd.setHours(23, 59, 59, 999)
+          // Convert to UTC for Microsoft API
+          const dayStart = dayStartInClientTZ.toUTC().toJSDate();
+          const dayEnd = dayEndInClientTZ.toUTC().toJSDate();
           
-          console.log(`📅 Fetching events for entire day: ${dayStart.toISOString()} to ${dayEnd.toISOString()}`)
+          console.log(`📅 Fetching events for entire day: ${dayStart.toISOString()} to ${dayEnd.toISOString()}`);
           
           // Use CalendarService to support both Microsoft and Google
           // Get clientId from parameter or connection
