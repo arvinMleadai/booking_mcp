@@ -48,12 +48,36 @@ export function extractBookingIds(instructionsText: string): BookingIds {
 
       return config;
     } catch (e) {
-      console.warn('⚠️ [extractBookingIds] JSON parse failed, no fallback to regex:', e);
+      console.warn('⚠️ [extractBookingIds] JSON parse failed, falling back to regex:', e);
+      // Continue to regex extraction below
     }
   }
 
-  // No fallback regex support - strictly JSON only per user request.
-  // If JSON was not found or parsing failed, return the (potentially empty) config.
+  // 1. Fallback: Regex-based extraction for weaker models
+  // Pattern: "Agent ID is <uuid>"
+  const agentIdMatch = instructionsText.match(/Agent\s+ID\s+is\s+([a-f0-9-]{36})/i);
+  if (agentIdMatch) config.agentId = agentIdMatch[1];
+
+  // Pattern: "Client ID is <number>"
+  const clientIdMatch = instructionsText.match(/Client\s+ID\s+is\s+(\d+)/i);
+  if (clientIdMatch) config.clientId = parseInt(clientIdMatch[1]);
+
+  // Pattern: "Board Id is <uuid>"
+  const boardIdMatch = instructionsText.match(/Board\s+Id\s+is\s+([a-f0-9-]{36})/i);
+  if (boardIdMatch) config.boardId = boardIdMatch[1];
+
+  // Pattern: "Stage Id is <uuid>"
+  const stageIdMatch = instructionsText.match(/Stage\s+Id\s+is\s+([a-f0-9-]{36})/i);
+  if (stageIdMatch) config.stageId = stageIdMatch[1];
+
+  // Pattern: "Deal id is <number>"
+  const dealIdMatch = instructionsText.match(/Deal\s+id\s+is\s+(\d+)/i);
+  if (dealIdMatch) config.dealId = parseInt(dealIdMatch[1]);
+
+  // Pattern: "Timezone is <timezone>"
+  const timezoneMatch = instructionsText.match(/Timezone\s+is\s+([\w\/]+)/i);
+  if (timezoneMatch) config.timezone = timezoneMatch[1];
+
   return config;
 }
 
