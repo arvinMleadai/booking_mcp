@@ -29,6 +29,7 @@ import {
   isValidUUID,
   isValidNumericId,
 } from './booking-extractor';
+import { parseGraphDateRequest } from '../booking_functions/calendar/graphHelper';
 import {
   validateTimeSlot,
   validateOfficeHours,
@@ -323,11 +324,16 @@ export class BookingService {
         };
       }
 
+      // Parse natural language dates (today/tomorrow/this monday/etc) to ISO format
+      const timezone = ids.timezone || agent.timezone || 'Australia/Perth';
+      const parsedDateResult = parseGraphDateRequest(request.preferredDate, timezone);
+      console.log(`📅 Parsed date: "${request.preferredDate}" → ${parsedDateResult.description} (${parsedDateResult.start} to ${parsedDateResult.end})`);
+
       // Find slots using calendar service
       const slotsResult = await CalendarService.findAvailableSlots(
         ids.clientId,
-        request.preferredDate,
-        request.preferredDate,
+        parsedDateResult.start,
+        parsedDateResult.start,
         {
           durationMinutes: request.durationMinutes || 60,
           maxSuggestions: request.maxSuggestions || 3,
@@ -335,6 +341,7 @@ export class BookingService {
         ids.agentId,
         calendarSelection.calendarId
       );
+
 
       if (!slotsResult.success || !slotsResult.availableSlots) {
         return {
