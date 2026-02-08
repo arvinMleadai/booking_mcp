@@ -912,6 +912,7 @@ export class BookingService {
 
     try {
       console.log(`📱 [sendSMSNotification] Sending SMS for ${context} to ${phoneNumber}`);
+      console.log(`📝 [sendSMSNotification] Message body:\n${message}`);
       
       await sendSMS(phoneNumber, message, telnyxApiKey);
       
