@@ -111,6 +111,65 @@ export function validateRequiredIds(
 }
 
 /**
+ * Helper to format extracted IDs for logging/debugging
+ * @param ids - The booking IDs that were extracted
+ * @returns Formatted string for logging
+ */
+export function formatExtractedIds(ids: BookingIds): string {
+  return JSON.stringify(ids, null, 2);
+}
+
+/**
+ * Infer missing boardId and stageId from dealId by querying the database
+ * This is useful when weaker AI models don't provide all IDs
+ * 
+ * @param ids - Current booking IDs
+ * @param clientId - Client ID for database queries
+ * @returns Updated booking IDs with inferred values
+ */
+export async function inferMissingIds(
+  ids: BookingIds,
+  clientId: number
+): Promise<BookingIds> {
+  const { getStageItemById, getPipelineStageById } = await import('../booking_functions/bookingMetadata');
+  
+  // If we have dealId but missing boardId or stageId, try to infer them
+  if (ids.dealId && (!ids.boardId || !ids.stageId)) {
+    try {
+      console.log(`🔍 [inferMissingIds] Attempting to infer missing IDs from dealId: ${ids.dealId}`);
+      
+      // Step 1: Get the deal to find pipeline_stage_id
+      const deal = await getStageItemById(ids.dealId);
+      if (!deal) {
+        console.warn(`⚠️ [inferMissingIds] Deal ${ids.dealId} not found`);
+        return ids;
+      }
+      
+      // Step 2: Infer stageId if missing
+      if (!ids.stageId && deal.pipeline_stage_id) {
+        ids.stageId = deal.pipeline_stage_id;
+        console.log(`✅ [inferMissingIds] Inferred stageId: ${ids.stageId}`);
+      }
+      
+      // Step 3: Get the stage to find pipeline_id (boardId)
+      if (!ids.boardId && deal.pipeline_stage_id) {
+        const stage = await getPipelineStageById(deal.pipeline_stage_id);
+        if (stage?.pipeline_id) {
+          ids.boardId = stage.pipeline_id;
+          console.log(`✅ [inferMissingIds] Inferred boardId: ${ids.boardId}`);
+        } else {
+          console.warn(`⚠️ [inferMissingIds] Could not find pipeline for stage ${deal.pipeline_stage_id}`);
+        }
+      }
+    } catch (error) {
+      console.error(`❌ [inferMissingIds] Error inferring IDs:`, error);
+    }
+  }
+  
+  return ids;
+}
+
+/**
  * Format instruction text for consistent extraction
  * Useful for testing and debugging
  * 

@@ -24,6 +24,8 @@ import type {
 import {
   extractBookingIds,
   validateRequiredIds,
+  formatInstructionsText,
+  inferMissingIds,
   isValidUUID,
   isValidNumericId,
 } from './booking-extractor';
@@ -69,7 +71,7 @@ export class BookingService {
       console.log('📞 [BookingService.bookAppointment] Starting booking process');
 
       // Step 1: Extract and validate IDs
-      const extractResult = this.extractAndValidateIds(
+      const extractResult = await this.extractAndValidateIds(
         request.instructionsText,
         {
           agentId: request.agentId,
@@ -273,7 +275,7 @@ export class BookingService {
       console.log('🔍 [BookingService.findAvailableSlots] Searching for slots');
 
       // Extract and validate IDs
-      const extractResult = this.extractAndValidateIds(
+      const extractResult = await this.extractAndValidateIds(
         request.instructionsText,
         {
           agentId: request.agentId,
@@ -379,7 +381,7 @@ export class BookingService {
     try {
       console.log('🗑️ [BookingService.cancelAppointment] Canceling appointment');
 
-      const extractResult = this.extractAndValidateIds(
+      const extractResult = await this.extractAndValidateIds(
         request.instructionsText,
         {
           agentId: request.agentId,
@@ -469,7 +471,7 @@ export class BookingService {
     try {
       console.log('📅 [BookingService.rescheduleAppointment] Rescheduling appointment');
 
-      const extractResult = this.extractAndValidateIds(
+      const extractResult = await this.extractAndValidateIds(
         request.instructionsText,
         {
           agentId: request.agentId,
@@ -601,16 +603,16 @@ export class BookingService {
    * Extract and validate booking IDs
    * Merges extracted IDs with explicit IDs from request
    */
-  private static extractAndValidateIds(
+  private static async extractAndValidateIds(
     instructionsText?: string,
     explicitIds?: Partial<BookingIds>
-  ): {
+  ): Promise<{
     valid: boolean;
     ids?: Required<Pick<BookingIds, 'clientId' | 'agentId'>> & Pick<BookingIds, 'boardId' | 'stageId' | 'dealId' | 'timezone'>;
     error?: string;
     code?: ErrorCode;
     details?: Record<string, any>;
-  } {
+  }> {
     console.debug('🔍 [extractAndValidateIds] Inputs:', { textLength: instructionsText?.length, explicitIds });
 
     // 1. Extract from text if available
@@ -621,12 +623,18 @@ export class BookingService {
       Object.entries(explicitIds || {}).filter(([_, v]) => v !== undefined && v !== null && v !== '')
     );
 
-    const mergedIds: BookingIds = {
+    let mergedIds: BookingIds = {
       ...extractedIds,
       ...cleanExplicitIds,
     };
     
     console.debug('🧩 [extractAndValidateIds] Merged IDs:', mergedIds);
+
+    // 2.5. Infer missing boardId/stageId from dealId if possible
+    if (mergedIds.clientId && mergedIds.dealId && (!mergedIds.boardId || !mergedIds.stageId)) {
+      mergedIds = await inferMissingIds(mergedIds, mergedIds.clientId);
+      console.debug('🧩 [extractAndValidateIds] After inference:', mergedIds);
+    }
 
     // 3. Validate
     const validation = validateRequiredIds(mergedIds);
