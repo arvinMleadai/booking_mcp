@@ -134,10 +134,10 @@ const handler = createMcpHandler((server) => {
         .string()
         .describe('REQUIRED: Booking instructions containing all IDs in JSON format. Example: {"clientId":"52","agentId":"uuid","boardId":"uuid","stageId":"uuid","dealId":"123","timezone":"Australia/Perth"}'),
       agentId: z.string().optional().describe('Agent UUID'),
-      clientId: z.number().optional().describe('Client ID'),
+      clientId: z.coerce.number().optional().describe('Client ID'),
       boardId: z.string().optional().describe('Board UUID'),
       stageId: z.string().optional().describe('Stage UUID'),
-      dealId: z.number().optional().describe('Deal ID'),
+      dealId: z.coerce.number().optional().describe('Deal ID'),
       timezone: z.string().optional().describe('Timezone'),
       startDateTime: z
         .string()
@@ -223,10 +223,10 @@ const handler = createMcpHandler((server) => {
         .string()
         .describe('REQUIRED: Booking instructions containing all IDs in JSON format. Example: {"clientId":"52","agentId":"uuid","boardId":"uuid","stageId":"uuid","dealId":"123","timezone":"Australia/Perth"}'),
       agentId: z.string().optional().describe('Agent UUID'),
-      clientId: z.number().optional().describe('Client ID'),
+      clientId: z.coerce.number().optional().describe('Client ID'),
       boardId: z.string().optional().describe('Board UUID'),
       stageId: z.string().optional().describe('Stage UUID'),
-      dealId: z.number().optional().describe('Deal ID'),
+      dealId: z.coerce.number().optional().describe('Deal ID'),
       timezone: z.string().optional().describe('Timezone'),
       preferredDate: z
         .string()
