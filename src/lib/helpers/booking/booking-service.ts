@@ -333,10 +333,12 @@ export class BookingService {
       const slotsResult = await CalendarService.findAvailableSlots(
         ids.clientId,
         parsedDateResult.start,
-        parsedDateResult.start,
+        parsedDateResult.end,
         {
           durationMinutes: request.durationMinutes || 60,
           maxSuggestions: request.maxSuggestions || 3,
+          officeHours: agent.officeHours,
+          agentTimezone: timezone, 
         },
         ids.agentId,
         calendarSelection.calendarId

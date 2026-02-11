@@ -234,13 +234,16 @@ export class OptimizedConflictDetection {
       
       if (officeHours && conflictCheck.conflictDetails?.includes('Outside office hours')) {
         // Office hours violation: search entire day within office hours
-        searchStart = new Date(requestedStart)
-        searchStart.setHours(0, 0, 0, 0)
+        // Use agentTimezone to ensure we're looking at the correct "day"
+        const requestedDateTime = DateTime.fromJSDate(requestedStart).setZone(agentTimezone);
         
-        searchEnd = new Date(requestedStart)
-        searchEnd.setHours(23, 59, 59, 999)
+        const dayStart = requestedDateTime.startOf('day');
+        const dayEnd = requestedDateTime.endOf('day');
         
-        console.log(`🔍 Office hours violation detected - searching entire day for available slots within office hours`)
+        searchStart = dayStart.toJSDate();
+        searchEnd = dayEnd.toJSDate();
+        
+        console.log(`🔍 Office hours violation detected - searching entire day (${dayStart.toISODate()}) in ${agentTimezone} for available slots`)
       } else if (conflictCheck.hasConflict) {
         // Regular conflict: use configured search window around requested time
         const searchWindow = searchWindowHours * 60 * 60 * 1000
