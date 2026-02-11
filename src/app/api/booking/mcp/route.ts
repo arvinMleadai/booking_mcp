@@ -263,6 +263,7 @@ const handler = createMcpHandler((server) => {
           calendarId: args.calendarId,
         });
 
+        
         console.log('✅ [FindAvailableSlots] Result:', JSON.stringify(result, null, 2));
 
         return {
