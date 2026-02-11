@@ -233,8 +233,8 @@ export class BookingService {
           event: {
             eventId: eventResult.eventId!,
             subject: eventResult.event?.subject || subject,
-            start: eventResult.event?.start.dateTime || request.startDateTime,
-            end: eventResult.event?.end.dateTime || request.endDateTime,
+            start: DateTime.fromISO(eventResult.event?.start.dateTime || request.startDateTime).setZone(agent.timezone || 'UTC').toISO() || request.startDateTime,
+            end: DateTime.fromISO(eventResult.event?.end.dateTime || request.endDateTime).setZone(agent.timezone || 'UTC').toISO() || request.endDateTime,
             location: eventResult.event?.location,
             meetingLink: eventResult.event?.onlineMeetingUrl,
             onlineMeetingUrl: eventResult.event?.onlineMeetingUrl,
@@ -356,8 +356,8 @@ export class BookingService {
       return {
         success: true,
         slots: slotsResult.availableSlots.map((slot) => ({
-          start: slot.start,
-          end: slot.end,
+          start: DateTime.fromISO(slot.start).setZone(timezone || 'UTC').toISO() || slot.start,
+          end: DateTime.fromISO(slot.end).setZone(timezone || 'UTC').toISO() || slot.end,
           startFormatted: slot.startFormatted,
           endFormatted: slot.endFormatted,
           available: true,
