@@ -437,6 +437,45 @@ const handler = createMcpHandler((server) => {
       }
     }
   );
+  // ============================================
+  // Tool 6: Calculate Date
+  // ============================================
+  server.tool(
+    'CalculateDate',
+    'Calculate a specific date based on natural language query. Use as source of truth.',
+    {
+      query: z.string().describe('Natural language date query (e.g., "next Monday", "tomorrow")'),
+      timezone: z.string().describe('Client timezone (e.g., "Australia/Perth")'),
+    },
+    async (args) => {
+      try {
+        console.log('📅 [CalculateDate] Called');
+        const result = await BookingService.calculateDate(args.query, args.timezone);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `<json>${JSON.stringify(result)}</json>`,
+            },
+          ],
+        };
+      } catch (error) {
+        console.error('❌ [CalculateDate] Error:', error);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `<json>${JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                code: 'UNKNOWN_ERROR',
+              })}</json>`,
+            },
+          ],
+        };
+      }
+    }
+  );
 },
 {
   serverInfo: {

@@ -56,6 +56,7 @@ import {
 } from '../booking_functions/bookingMetadata';
 import { CalendarService } from '../booking_functions/calendar/calendar-service';
 import { getCalendarConnectionByPipelineId } from '../booking_functions/calendar/graphDatabase';
+import { OptimizedConflictDetection } from '../booking_functions/calendar/optimizedConflictDetection';
 import { sendSMS } from 'lead-ai-npm-modules';
 
 
@@ -97,10 +98,21 @@ export class BookingService {
       console.log('✅ IDs extracted:', ids);
       console.log('✅ Instructions Text:', request.instructionsText);
 
+      // RESOLVE DATES: Handle natural language override if present ("next Monday")
+      // This fixes LLM date calculation errors by using robust graph parsing
+      const resolved = await this.resolveDateOverride(
+        request.startDateTime,
+        request.endDateTime,
+        request.preferredDate,
+        ids.timezone || 'UTC'
+      );
+      const startDateTime = resolved.start;
+      const endDateTime = resolved.end;
+
       // Step 2: Validate time slot
       const timeValidation = validateTimeSlot({
-        startDateTime: request.startDateTime,
-        endDateTime: request.endDateTime,
+        startDateTime: startDateTime,
+        endDateTime: endDateTime,
       });
       if (!timeValidation.valid) {
         return {
@@ -152,7 +164,7 @@ export class BookingService {
       // Step 6: Validate office hours
       if (agent.officeHours && agent.timezone) {
         const hoursValidation = validateOfficeHours(
-          request.startDateTime,
+          startDateTime, // Use resolved
           agent.officeHours,
           agent.timezone
         );
@@ -173,13 +185,43 @@ export class BookingService {
         request.subject
       );
 
+      // CHECK CONFLICTS: Prevent double bookings (explicit check)
+      if (calendarSelection.calendarConnection) {
+        console.log('🔍 [bookAppointment] Checking for conflicts...');
+        try {
+          const conflictResult = await OptimizedConflictDetection.checkForConflicts(
+            calendarSelection.calendarConnection,
+            startDateTime, // ISO String
+            endDateTime,   // ISO String
+            agent.timezone || 'UTC', // timeZone
+            agent.officeHours, // officeHours
+            agent.timezone || 'UTC', // agentTimezone
+            ids.clientId, // clientId
+            calendarSelection.calendarId
+          );
+
+          if (conflictResult.hasConflict) {
+            console.warn('⚠️ [bookAppointment] Slot conflict detected');
+            // Return conflict response
+            return {
+              success: false,
+              conflict: true,
+              message: 'Time slot is already booked',
+              suggestedSlots: [], // Fetching suggestions requires full search logic
+            };
+          }
+        } catch (error) {
+          console.error('⚠️ [bookAppointment] Conflict check failed, proceeding cautiously:', error);
+        }
+      }
+
       // Step 8: Create calendar event
       const eventResult = await CalendarService.createEvent(
         ids.clientId,
         {
           subject,
-          startDateTime: request.startDateTime,
-          endDateTime: request.endDateTime,
+          startDateTime: startDateTime, // Use resolved
+          endDateTime: endDateTime,     // Use resolved
           timeZone: agent.timezone || 'UTC',
           description: request.description,
           location: request.location,
@@ -504,10 +546,21 @@ export class BookingService {
 
       const ids = extractResult.ids;
 
+      // RESOLVE DATES: Handle natural language override if present ("next Monday")
+      // This fixes LLM date calculation errors by using robust graph parsing
+      const resolved = await this.resolveDateOverride(
+        request.newStartDateTime,
+        request.newEndDateTime,
+        request.preferredDate,
+        ids.timezone || 'UTC'
+      );
+      const startDateTime = resolved.start;
+      const endDateTime = resolved.end;
+
       // Validate new time slot
       const timeValidation = validateTimeSlot({
-        startDateTime: request.newStartDateTime,
-        endDateTime: request.newEndDateTime,
+        startDateTime: startDateTime,
+        endDateTime: endDateTime,
       });
       if (!timeValidation.valid) {
         return {
@@ -521,8 +574,8 @@ export class BookingService {
       const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
       if (agent?.officeHours && agent?.timezone) {
         const hoursValidation = validateOfficeHours(
-          request.newStartDateTime,
-          agent.officeHours,
+          startDateTime,
+          agent.officeHours, // Now using potentially overridden date
           agent.timezone
         );
         if (!hoursValidation.valid) {
@@ -549,13 +602,43 @@ export class BookingService {
         };
       }
 
+      // CHECK CONFLICTS: Prevent double bookings
+      if (calendarSelection.calendarConnection) {
+        console.log('🔍 [rescheduleAppointment] Checking for conflicts...');
+        try {
+          const conflictResult = await OptimizedConflictDetection.checkForConflicts(
+            calendarSelection.calendarConnection,
+            startDateTime, // ISO String
+            endDateTime,   // ISO String
+            agent?.timezone || 'UTC', // timeZone
+            agent?.officeHours, // officeHours
+            agent?.timezone || 'UTC', // agentTimezone
+            ids.clientId, // clientId needed for internal fetch
+            calendarSelection.calendarId
+          );
+
+          if (conflictResult.hasConflict) {
+            console.warn('⚠️ [rescheduleAppointment] Slot conflict detected');
+            return {
+              success: false,
+              error: 'Time slot is already booked',
+              code: 'SLOT_CONFLICT' as ErrorCode,
+            };
+          }
+        } catch (error) {
+          console.error('⚠️ [rescheduleAppointment] Conflict check failed, proceeding with caution:', error);
+          // Start cautious: don't block reschedule on check failure?
+          // Given "double booking" complaint, safer to assume it's okay unless explicit conflict.
+        }
+      }
+
       // Update event
       const updateResult = await CalendarService.updateEvent(
         ids.clientId,
         request.eventId,
         {
-          startDateTime: request.newStartDateTime,
-          endDateTime: request.newEndDateTime,
+          startDateTime: startDateTime,
+          endDateTime: endDateTime,
           timeZone: agent?.timezone || 'UTC',
         }
       );
@@ -589,8 +672,8 @@ export class BookingService {
         event: {
           eventId: request.eventId,
           subject: updateResult.event?.subject || '',
-          start: updateResult.event?.start.dateTime || request.newStartDateTime,
-          end: updateResult.event?.end.dateTime || request.newEndDateTime,
+          start: DateTime.fromISO(updateResult.event?.start.dateTime || request.newStartDateTime).setZone(agent?.timezone || 'UTC').toISO() || request.newStartDateTime,
+          end: DateTime.fromISO(updateResult.event?.end.dateTime || request.newEndDateTime).setZone(agent?.timezone || 'UTC').toISO() || request.newEndDateTime,
           location: updateResult.event?.location,
           meetingLink: updateResult.event?.onlineMeetingUrl,
         },
@@ -859,6 +942,7 @@ export class BookingService {
             calendarEmail: pipelineCalendar.email || '',
             provider: pipelineCalendar.provider_name as 'MICROSOFT' | 'GOOGLE',
             source: 'pipeline',
+            calendarConnection: pipelineCalendar,
           };
         }
       }
@@ -872,6 +956,7 @@ export class BookingService {
           calendarEmail: agentCalendar.email || '',
           provider: agentCalendar.provider_name as 'MICROSOFT' | 'GOOGLE',
           source: 'agent',
+          calendarConnection: agentCalendar,
         };
       }
 
@@ -940,6 +1025,86 @@ export class BookingService {
       // Log error but don't throw - SMS failures shouldn't break bookings
       console.error(`❌ [sendSMSNotification] Failed to send SMS for ${context}:`, error);
       console.error('SMS failure is non-critical - booking continues');
+    }
+  }
+
+  /**
+   * Resolve natural language date override
+   * Keeps original time, updates date based on "next Monday" etc.
+   */
+  private static async resolveDateOverride(
+    originalStartIso: string,
+    originalEndIso: string,
+    preferredDate: string | undefined,
+    timezone: string
+  ): Promise<{ start: string; end: string }> {
+    if (!preferredDate) {
+      return { start: originalStartIso, end: originalEndIso };
+    }
+
+    try {
+      console.log(`📅 [resolveDateOverride] Processing override: "${preferredDate}"`);
+      // Use existing graph parsing logic (handles "next Monday", "tomorrow")
+      // parseGraphDateRequest returns UTC range for the day
+      const parsedRange = parseGraphDateRequest(preferredDate, timezone);
+      
+      // Convert start of range back to client timezone to get the target date
+      const targetDate = DateTime.fromISO(parsedRange.start).setZone(timezone);
+
+      // Parse original times to extract Hour/Minute
+      // Use setZone to align with client timezone
+      const originalStart = DateTime.fromISO(originalStartIso).setZone(timezone);
+      const originalEnd = DateTime.fromISO(originalEndIso).setZone(timezone);
+      
+      // Combine target date + original time
+      const newStart = targetDate.set({
+        hour: originalStart.hour,
+        minute: originalStart.minute,
+        second: 0,
+        millisecond: 0
+      });
+      
+      // Calculate duration to set end time relative to start
+      const duration = originalEnd.diff(originalStart);
+      const newEnd = newStart.plus(duration);
+      
+      const newStartIso = newStart.toISO() || originalStartIso;
+      const newEndIso = newEnd.toISO() || originalEndIso;
+
+      console.log(`✅ [resolveDateOverride] Overridden: ${originalStartIso} -> ${newStartIso}`);
+      
+      return {
+        start: newStartIso,
+        end: newEndIso
+      };
+    } catch (error) {
+      console.warn(`⚠️ [resolveDateOverride] Failed to parse date "${preferredDate}":`, error);
+      return { start: originalStartIso, end: originalEndIso };
+    }
+  }
+
+  /**
+   * Public method to calculate date from natural language query
+   * Used by MCP tool as single source of truth
+   */
+  static async calculateDate(
+    query: string,
+    timezone: string
+  ): Promise<{ date: string; description: string; iso: string }> {
+    try {
+      console.log(`📅 [calculateDate] Processing query: "${query}" in ${timezone}`);
+      
+      const parsedRange = parseGraphDateRequest(query, timezone);
+      const targetDate = DateTime.fromISO(parsedRange.start).setZone(timezone);
+      
+      return {
+        date: targetDate.toFormat('cccc, MMMM d, yyyy'), // "Monday, February 16, 2026"
+        description: parsedRange.description || query,
+        iso: targetDate.toISODate() || '', // "2026-02-16"
+      };
+    } catch (error) {
+      console.error('❌ [calculateDate] Error:', error);
+      throw new Error(`Failed to calculate date for query "${query}"`);
     }
   }
 }

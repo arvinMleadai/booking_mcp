@@ -32,6 +32,7 @@ export interface BookingRequest {
   instructionsText?: string; // Made optional if IDs provided explicitly
   startDateTime: string;
   endDateTime: string;
+  preferredDate?: string; // Natural language date ("next Monday") override
 
   // Optional - explicit IDs from tool arguments
   agentId?: string;
@@ -88,6 +89,7 @@ export interface RescheduleRequest {
   eventId: string;
   newStartDateTime: string;
   newEndDateTime: string;
+  preferredDate?: string; // Natural language date ("next Monday") override
   calendarId?: string;
   notifyCustomer?: boolean;
 }
@@ -248,6 +250,7 @@ export interface CalendarSelection {
   calendarEmail: string;
   provider: 'MICROSOFT' | 'GOOGLE';
   source: 'explicit' | 'pipeline' | 'agent';
+  calendarConnection?: any;
 }
 
 export interface CustomerLookupResult {

@@ -397,7 +397,7 @@ export class OptimizedConflictDetection {
       searchStart,
       searchEnd,
       slotDuration,
-      30 // 30-minute intervals
+      durationMinutes // Use requested duration as interval for cleaner slots
     )
 
     let skippedPast = 0
