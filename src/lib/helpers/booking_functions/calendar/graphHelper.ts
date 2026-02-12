@@ -706,7 +706,7 @@ export function parseGraphDateRequest(
       break
 
     // Handle "this friday", "next monday", etc.
-    case /^this (monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(lower): {
+    case /^(this\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(lower): {
       const dayName = lower.replace("this ", "")
       const targetDay = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"].indexOf(dayName)
       // Convert Luxon weekday (1=Mon, 7=Sun) to our array index (0=Sun, 6=Sat)
@@ -714,7 +714,7 @@ export function parseGraphDateRequest(
       
       
       let diff = (targetDay - currentWeekday + 7) % 7
-      // If diff is 0, it means it's today - for "this friday" we want the upcoming friday
+      // If diff is 0, it means it's today - for "this friday" we want the upcoming friday (today)
       if (diff === 0) {
         diff = 0 // Use today if it's the same day
       }

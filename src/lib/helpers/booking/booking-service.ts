@@ -327,7 +327,9 @@ export class BookingService {
       // Parse natural language dates (today/tomorrow/this monday/etc) to ISO format
       const timezone = ids.timezone || agent.timezone || 'Australia/Perth';
       const parsedDateResult = parseGraphDateRequest(request.preferredDate, timezone);
-      console.log(`📅 Parsed date: "${request.preferredDate}" → ${parsedDateResult.description} (${parsedDateResult.start} to ${parsedDateResult.end})`);
+      const logStart = DateTime.fromISO(parsedDateResult.start).setZone(timezone).toFormat('yyyy-MM-dd HH:mm');
+      const logEnd = DateTime.fromISO(parsedDateResult.end).setZone(timezone).toFormat('yyyy-MM-dd HH:mm');
+      console.log(`📅 Parsed date: "${request.preferredDate}" → ${parsedDateResult.description} (${logStart} to ${logEnd} ${timezone})`);
 
       // Find slots using calendar service
       const slotsResult = await CalendarService.findAvailableSlots(
