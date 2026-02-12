@@ -429,12 +429,25 @@ export class OptimizedConflictDetection {
       
       // Check office hours if provided
       if (officeHours) {
-        const officeHoursCheck = isWithinOfficeHours(
+        // Check if start time is within office hours
+        const startCheck = isWithinOfficeHours(
           candidate.start.toISOString(),
           officeHours,
           agentTimezone || 'Australia/Melbourne'
         )
-        if (!officeHoursCheck.isWithin) {
+        if (!startCheck.isWithin) {
+          skippedOfficeHours++
+          continue
+        }
+
+        // Check if end time is within office hours
+        // This prevents slots starting at 5pm if office closes at 5pm
+        const endCheck = isWithinOfficeHours(
+          candidate.end.toISOString(),
+          officeHours,
+          agentTimezone || 'Australia/Melbourne'
+        )
+        if (!endCheck.isWithin) {
           skippedOfficeHours++
           continue
         }
