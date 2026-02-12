@@ -446,8 +446,8 @@ export class OptimizedConflictDetection {
       slots.push({
         start: candidate.start,
         end: candidate.end,
-        startFormatted: this.formatTimeForDisplay(candidate.start),
-        endFormatted: this.formatTimeForDisplay(candidate.end),
+        startFormatted: this.formatTimeForDisplay(candidate.start, tz),
+        endFormatted: this.formatTimeForDisplay(candidate.end, tz),
         confidence
       })
     }
@@ -515,9 +515,9 @@ export class OptimizedConflictDetection {
   /**
    * Format time for display
    */
-  private static formatTimeForDisplay(date: Date): string {
+  private static formatTimeForDisplay(date: Date, timezone: string): string {
     return date.toLocaleString('en-AU', {
-      timeZone: 'Australia/Melbourne',
+      timeZone: timezone || 'Australia/Perth',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

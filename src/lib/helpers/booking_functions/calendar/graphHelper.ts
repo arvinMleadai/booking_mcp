@@ -706,8 +706,8 @@ export function parseGraphDateRequest(
       break
 
     // Handle "this friday", "next monday", etc.
-    case /^(this\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(lower): {
-      const dayName = lower.replace("this ", "")
+    case /^(this\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)[!?.]*$/.test(lower): {
+      const dayName = lower.replace("this ", "").replace(/[!?.]/g, "").trim()
       const targetDay = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"].indexOf(dayName)
       // Convert Luxon weekday (1=Mon, 7=Sun) to our array index (0=Sun, 6=Sat)
       const currentWeekday = nowInClientTZ.weekday === 7 ? 0 : nowInClientTZ.weekday
@@ -725,8 +725,8 @@ export function parseGraphDateRequest(
       break
     }
 
-    case /^next (monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(lower): {
-      const dayName = lower.replace("next ", "")
+    case /^next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)[!?.]*$/.test(lower): {
+      const dayName = lower.replace("next ", "").replace(/[!?.]/g, "").trim()
       const targetDay = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"].indexOf(dayName)
       const diff = (targetDay - nowInClientTZ.weekday + 7) % 7 || 7
       start = nowInClientTZ.plus({ days: diff }).startOf("day")
