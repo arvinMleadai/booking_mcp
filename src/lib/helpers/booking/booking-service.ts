@@ -59,6 +59,16 @@ import { getCalendarConnectionByPipelineId } from '../booking_functions/calendar
 import { OptimizedConflictDetection } from '../booking_functions/calendar/optimizedConflictDetection';
 import { sendSMS } from 'lead-ai-npm-modules';
 
+const DEFAULT_OFFICE_HOURS = {
+  monday: { start: '09:00', end: '17:00', enabled: true },
+  tuesday: { start: '09:00', end: '17:00', enabled: true },
+  wednesday: { start: '09:00', end: '17:00', enabled: true },
+  thursday: { start: '09:00', end: '17:00', enabled: true },
+  friday: { start: '09:00', end: '17:00', enabled: true },
+  saturday: { start: '09:00', end: '17:00', enabled: false },
+  sunday: { start: '09:00', end: '17:00', enabled: false },
+};
+
 
 
 export class BookingService {
@@ -903,7 +913,7 @@ export class BookingService {
         profileName: profileData?.name || agent.name,
         title: agent.title || '',
         email: (agent.calendar_assignment?.calendar_connections as any)?.email,
-        officeHours: profileData?.office_hours,
+        officeHours: profileData?.office_hours || DEFAULT_OFFICE_HOURS,
         timezone: profileData?.timezone,
       };
     } catch (error) {
