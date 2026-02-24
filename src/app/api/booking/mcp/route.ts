@@ -244,6 +244,7 @@ const handler = createMcpHandler((server) => {
         .default(3)
         .describe('Maximum number of slot suggestions (default: 3)'),
       calendarId: z.string().optional().describe('Calendar ID override (optional)'),
+      customerName: z.string().optional().describe('Caller\'s name for inbound contact lookup via fuzzy search (e.g., the caller\'s name from the conversation)'),
     },
     async (args) => {
       try {
@@ -261,6 +262,7 @@ const handler = createMcpHandler((server) => {
           durationMinutes: args.durationMinutes,
           maxSuggestions: args.maxSuggestions,
           calendarId: args.calendarId,
+          customerName: args.customerName,
         });
 
         

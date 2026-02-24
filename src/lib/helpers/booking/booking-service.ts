@@ -383,6 +383,14 @@ export class BookingService {
       const logEnd = DateTime.fromISO(parsedDateResult.end).setZone(timezone).toFormat('yyyy-MM-dd HH:mm');
       console.log(`📅 Parsed date: "${request.preferredDate}" → ${parsedDateResult.description} (${logStart} to ${logEnd} ${timezone})`);
 
+      // Lookup caller contact (inbound: fuzzy search by name; outbound: lookup via dealId)
+      // Kicked off in parallel with slot search to avoid extra latency
+      const customerLookupPromise = this.lookupCustomer(
+        ids.dealId ?? null,
+        ids.clientId,
+        request.customerName ? { name: request.customerName } : undefined
+      );
+
       // Find slots using calendar service
       const slotsResult = await CalendarService.findAvailableSlots(
         ids.clientId,
@@ -398,6 +406,13 @@ export class BookingService {
         calendarSelection.calendarId
       );
 
+      // Await the customer lookup result
+      const customerResult = await customerLookupPromise;
+      if (customerResult.found) {
+        console.log(`✅ [findAvailableSlots] Caller resolved: ${customerResult.customer?.name} <${customerResult.customer?.email}>`);
+      } else {
+        console.log('ℹ️ [findAvailableSlots] No matching contact found for caller');
+      }
 
       if (!slotsResult.success || !slotsResult.availableSlots) {
         return {
@@ -423,6 +438,8 @@ export class BookingService {
           title: agent.title,
           email: agent.email,
         },
+        // Include resolved caller info so BookAppointment can use it directly
+        ...(customerResult.found && { customer: customerResult.customer }),
       };
     } catch (error) {
       console.error('❌ [BookingService.findAvailableSlots] Error:', error);
@@ -433,6 +450,7 @@ export class BookingService {
       };
     }
   }
+
 
   /**
    * Cancel customer appointment

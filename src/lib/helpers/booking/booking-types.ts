@@ -73,6 +73,9 @@ export interface SlotSearchRequest {
   durationMinutes?: number;
   maxSuggestions?: number;
   calendarId?: string;
+
+  // Inbound call: caller's name for fuzzy contact lookup
+  customerName?: string;
 }
 
 export interface RescheduleRequest {
@@ -183,6 +186,7 @@ export interface SlotsResponse {
   success: boolean;
   slots?: AvailableSlot[];
   agent?: BookingAgent;
+  customer?: BookingCustomer; // Resolved caller contact (inbound calls)
   error?: string;
   code?: ErrorCode;
 }
