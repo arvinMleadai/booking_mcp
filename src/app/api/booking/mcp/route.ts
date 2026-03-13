@@ -126,6 +126,7 @@ const handler = createMcpHandler((server) => {
   // ============================================
   // Tool 2: Book Appointment
   // ============================================
+  
   server.tool(
     'BookAppointment',
     'Book a customer appointment with automatic conflict detection and slot suggestions',
