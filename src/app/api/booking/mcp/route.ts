@@ -132,7 +132,8 @@ const handler = createMcpHandler((server) => {
     {
       instructionsText: z
         .string()
-        .describe('REQUIRED: Booking instructions containing all IDs in JSON format. Example: {"clientId":"52","agentId":"uuid","boardId":"uuid","stageId":"uuid","dealId":"123","timezone":"Australia/Perth"}'),
+        .optional()
+        .describe('Booking instructions containing all IDs in JSON format. If omitted, IDs will be built from the explicit fields (clientId/agentId/boardId/stageId/dealId/timezone).'),
       agentId: z.string().optional().describe('Agent UUID'),
       clientId: z.coerce.number().optional().describe('Client ID'),
       boardId: z.string().optional().describe('Board UUID'),
@@ -141,9 +142,11 @@ const handler = createMcpHandler((server) => {
       timezone: z.string().optional().describe('Timezone'),
       startDateTime: z
         .string()
+        .optional()
         .describe('Start time in ISO 8601 format (e.g., 2025-12-06T13:00:00)'),
       endDateTime: z
         .string()
+        .optional()
         .describe('End time in ISO 8601 format (e.g., 2025-12-06T14:00:00)'),
       customerName: z.string().optional().describe('Customer name (optional)'),
       customerEmail: z.string().email().optional().describe('Customer email (optional)'),
@@ -162,8 +165,60 @@ const handler = createMcpHandler((server) => {
       try {
         console.log('📞 [BookAppointment] Called');
 
+        const hasInstructionsText: boolean =
+          typeof args.instructionsText === 'string' && args.instructionsText.trim().length > 0
+
+        const builtInstructionsText: string | undefined = hasInstructionsText
+          ? args.instructionsText
+          : JSON.stringify({
+              clientId: args.clientId,
+              agentId: args.agentId,
+              dealId: args.dealId,
+              boardId: args.boardId,
+              stageId: args.stageId,
+              timezone: args.timezone,
+            })
+
+        const instructionsText: string = builtInstructionsText ?? ''
+
+        if (!instructionsText.trim()) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `<json>${JSON.stringify({
+                  success: false,
+                  code: 'MISSING_INSTRUCTIONS',
+                  error:
+                    'Missing booking instructions. Provide instructionsText or the explicit ID fields (clientId, agentId, boardId, stageId, dealId, timezone).',
+                })}</json>`,
+              },
+            ],
+          }
+        }
+
+        if (!args.startDateTime || !args.endDateTime) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `<json>${JSON.stringify({
+                  success: false,
+                  code: 'MISSING_TIME_RANGE',
+                  error:
+                    'Missing startDateTime/endDateTime. BookAppointment requires an ISO startDateTime and endDateTime (use a slot returned by FindAvailableSlots).',
+                  received: {
+                    startDateTime: args.startDateTime ?? null,
+                    endDateTime: args.endDateTime ?? null,
+                  },
+                })}</json>`,
+              },
+            ],
+          }
+        }
+
         const result = await BookingService.bookAppointment({
-          instructionsText: args.instructionsText,
+          instructionsText,
           agentId: args.agentId,
           clientId: args.clientId,
           boardId: args.boardId,
