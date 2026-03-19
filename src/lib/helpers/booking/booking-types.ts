@@ -189,20 +189,6 @@ export interface SlotsResponse {
   customer?: BookingCustomer; // Resolved caller contact (inbound calls)
   error?: string;
   code?: ErrorCode;
-  /** Short phrase for the agent to say to the customer (e.g. "I found 3 available times.") */
-  customerFacingMessage?: string;
-}
-
-/** Result of resolving booking context only (IDs + agent + calendar). Used for chunked MCP flow. */
-export interface BookingContextResponse {
-  success: boolean;
-  ids?: Required<Pick<BookingIds, 'clientId' | 'agentId'>> & Pick<BookingIds, 'boardId' | 'stageId' | 'dealId' | 'timezone'>;
-  agent?: BookingAgent & { timezone?: string; officeHours?: unknown };
-  calendarConnected?: boolean;
-  error?: string;
-  code?: ErrorCode;
-  /** Short phrase for the agent to say to the customer (e.g. "I'm checking Sarah's calendar.") */
-  customerFacingMessage?: string;
 }
 
 export interface CancelResponse {

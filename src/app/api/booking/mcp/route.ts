@@ -2,26 +2,27 @@ import { z } from 'zod';
 import { createMcpHandler } from 'mcp-handler';
 import { BookingService } from '@/lib/helpers/booking/booking-service';
 import { extractBookingIds } from '@/lib/helpers/booking/booking-extractor';
-import { getAgentWithCalendarByUUID } from '@/lib/helpers/utils';
+import { getAgentsForClient } from '@/lib/helpers/utils';
 import { getCalendarConnectionByPipelineId } from '@/lib/helpers/booking_functions/calendar/graphDatabase';
 
 
 const handler = createMcpHandler((server) => {
   // ============================================
-  // Tool 1: List Agents (current agent only – use agentId from instructionsText)
+  // Tool 1: List Agents
   // ============================================
   server.tool(
     'ListAgents',
-    'Get the current agent from booking instructions (instructionsText must include agentId and clientId). Returns only that agent with calendar status. If the agent has no calendar, provide boardId in instructionsText – the board/pipeline calendar will be used for availability. Use the agentId from the prompt – do not list all agents.',
+    'List all available agents with their calendar connection status',
     {
       instructionsText: z
         .string()
-        .describe('Booking instructions: clientId and agentId (required). boardId (optional but recommended when agent has no calendar – then board calendar is used). Optional: stageId, dealId, timezone'),
+        .describe('Booking instructions containing clientId, agentIdand optional boardId'),
     },
     async (args) => {
       try {
         console.log('📋 [ListAgents] Called');
 
+        // Extract IDs
         const ids = extractBookingIds(args.instructionsText);
 
         if (!ids.clientId) {
@@ -29,61 +30,40 @@ const handler = createMcpHandler((server) => {
             content: [
               {
                 type: 'text',
-                text: `<json>${JSON.stringify({
-                  success: false,
-                  error: 'clientId not found in instructions. Provide clientId in instructionsText.',
-                  code: 'MISSING_IDS',
-                  customerFacingMessage: "I couldn't verify the booking details. Please try again.",
-                })}</json>`,
+                text: 'Error: clientId not found in instructions. Please provide clientId in the instructions text.',
               },
             ],
           };
         }
 
-        if (!ids.agentId) {
+        // Get agents
+        const result = await getAgentsForClient(ids.clientId, {
+          includeDedicated: true,
+          withCalendarOnly: false,
+        });
+
+        if (!result || result.length === 0) {
           return {
             content: [
               {
                 type: 'text',
                 text: `<json>${JSON.stringify({
                   success: false,
-                  error: 'agentId not found in instructions. ListAgents returns the current agent only – include agentId in instructionsText.',
-                  code: 'MISSING_IDS',
-                  customerFacingMessage: "I couldn't identify the current agent. Please check the booking instructions.",
-                })}</json>`,
-              },
-            ],
-          };
-        }
-
-        const agent = await getAgentWithCalendarByUUID(ids.agentId, ids.clientId);
-
-        if (!agent) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `<json>${JSON.stringify({
-                  success: false,
-                  error: 'Agent not found or does not belong to this client',
+                  error: 'No agents found',
                   clientId: ids.clientId,
-                  agentId: ids.agentId,
-                  code: 'AGENT_NOT_FOUND',
-                  customerFacingMessage: "I couldn't find that agent. Please check the booking details.",
                 })}</json>`,
               },
             ],
           };
         }
 
-        const conn = agent.calendar_assignment?.calendar_connections as { provider_name?: string; email?: string } | null | undefined;
-        const hasCalendar = !!conn?.email;
-        const calendarProvider = conn?.provider_name;
-        const calendarEmail = conn?.email;
-
-        let boardCalendar: { provider: string; email: string } | null = null;
+        // Get board calendar if boardId provided
+        let boardCalendar = null;
         if (ids.boardId) {
-          const connection = await getCalendarConnectionByPipelineId(ids.boardId, ids.clientId);
+          const connection = await getCalendarConnectionByPipelineId(
+            ids.boardId,
+            ids.clientId
+          );
           if (connection) {
             boardCalendar = {
               provider: connection.provider_name,
@@ -92,25 +72,25 @@ const handler = createMcpHandler((server) => {
           }
         }
 
-        const calendar = hasCalendar && calendarProvider && calendarEmail
-          ? { provider: calendarProvider, email: calendarEmail, source: 'agent' as const }
-          : boardCalendar
-            ? { provider: boardCalendar.provider, email: boardCalendar.email, source: 'board' as const }
-            : null;
-
-        const agentPayload = {
+        // Format response
+        const agents = result.map((agent) => ({
           uuid: agent.uuid,
           name: agent.name,
-          title: agent.title ?? '',
-          calendar,
-          /** When agent has no calendar, boardId is used; calendar.source is 'board' in that case. */
-          calendarSource: calendar?.source ?? null,
-        };
-
-        const profileName = (agent as { profiles?: { name?: string } }).profiles?.name ?? agent.name;
-        const customerFacingMessage = calendar
-          ? `I can check availability for ${profileName} when you're ready.`
-          : `I'm sorry, I can't check availability for ${profileName} right now.`;
+          title: agent.title,
+          calendar: agent.hasCalendar && agent.calendarProvider && agent.calendarEmail
+            ? {
+                provider: agent.calendarProvider,
+                email: agent.calendarEmail,
+                source: 'agent',
+              }
+            : boardCalendar
+            ? {
+                provider: boardCalendar.provider,
+                email: boardCalendar.email,
+                source: 'board',
+              }
+            : null,
+        }));
 
         return {
           content: [
@@ -118,11 +98,9 @@ const handler = createMcpHandler((server) => {
               type: 'text',
               text: `<json>${JSON.stringify({
                 success: true,
-                agents: [agentPayload],
+                agents,
                 clientId: ids.clientId,
-                agentId: ids.agentId,
-                totalAgents: 1,
-                customerFacingMessage,
+                totalAgents: agents.length,
               })}</json>`,
             },
           ],
@@ -137,7 +115,6 @@ const handler = createMcpHandler((server) => {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-                customerFacingMessage: "Something went wrong. Please try again.",
               })}</json>`,
             },
           ],
@@ -147,65 +124,7 @@ const handler = createMcpHandler((server) => {
   );
 
   // ============================================
-  // Tool 2: Get Booking Context (chunked flow – say "checking calendar" then call FindAvailableSlots)
-  // ============================================
-  server.tool(
-    'GetBookingContext',
-    'Resolve booking context (agent + calendar) so you can tell the customer what you are checking. Call this first, then say the customerFacingMessage to the customer, then call FindAvailableSlots. Returns agent name and a short phrase to say.',
-    {
-      instructionsText: z
-        .string()
-        .describe('Booking instructions containing clientId, agentId, and optional boardId, stageId, dealId, timezone'),
-      agentId: z.string().optional().describe('Agent UUID'),
-      clientId: z.coerce.number().optional().describe('Client ID'),
-      boardId: z.string().optional().describe('Board UUID'),
-      stageId: z.string().optional().describe('Stage UUID'),
-      dealId: z.coerce.number().optional().describe('Deal ID'),
-      timezone: z.string().optional().describe('Timezone'),
-      calendarId: z.string().optional().describe('Calendar ID override (optional)'),
-    },
-    async (args) => {
-      try {
-        console.log('📋 [GetBookingContext] Called');
-        const result = await BookingService.resolveBookingContext({
-          instructionsText: args.instructionsText,
-          agentId: args.agentId,
-          clientId: args.clientId,
-          boardId: args.boardId,
-          stageId: args.stageId,
-          dealId: args.dealId,
-          timezone: args.timezone,
-          calendarId: args.calendarId,
-        });
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `<json>${JSON.stringify(result)}</json>`,
-            },
-          ],
-        };
-      } catch (error) {
-        console.error('❌ [GetBookingContext] Error:', error);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `<json>${JSON.stringify({
-                success: false,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                code: 'UNKNOWN_ERROR',
-                customerFacingMessage: "Something went wrong. Please try again.",
-              })}</json>`,
-            },
-          ],
-        };
-      }
-    }
-  );
-
-  // ============================================
-  // Tool 3: Book Appointment (main booking tool)
+  // Tool 2: Book Appointment
   // ============================================
   
   server.tool(
@@ -323,25 +242,11 @@ const handler = createMcpHandler((server) => {
 
         console.log('✅ [BookAppointment] Result:', JSON.stringify(result, null, 2));
 
-        const bookingPayload =
-          'success' in result && result.success && result.booking
-            ? {
-                ...result,
-                customerFacingMessage: `Your appointment is confirmed. You'll receive a confirmation by SMS shortly.`,
-              }
-            : 'conflict' in result && result.conflict
-              ? {
-                  ...result,
-                  customerFacingMessage:
-                    "That time is no longer available. I can suggest other times if you'd like.",
-                }
-              : { ...result };
-
         return {
           content: [
             {
               type: 'text',
-              text: `<json>${JSON.stringify(bookingPayload)}</json>`,
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -355,7 +260,6 @@ const handler = createMcpHandler((server) => {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-                customerFacingMessage: "Booking didn't go through. Please try again or pick another time.",
               })}</json>`,
             },
           ],
@@ -365,7 +269,7 @@ const handler = createMcpHandler((server) => {
   );
 
   // ============================================
-  // Tool 4: Find Available Slots
+  // Tool 3: Find Available Slots
   // ============================================
   server.tool(
     'FindAvailableSlots',
@@ -438,7 +342,6 @@ const handler = createMcpHandler((server) => {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-                customerFacingMessage: "Something went wrong while checking availability. Please try again.",
               })}</json>`,
             },
           ],
@@ -448,7 +351,7 @@ const handler = createMcpHandler((server) => {
   );
 
   // ============================================
-  // Tool 5: Cancel Appointment
+  // Tool 4: Cancel Appointment
   // ============================================
   server.tool(
     'CancelAppointment',
@@ -490,18 +393,11 @@ const handler = createMcpHandler((server) => {
 
         console.log('✅ [CancelAppointment] Result:', JSON.stringify(result, null, 2));
 
-        const cancelPayload = {
-          ...result,
-          customerFacingMessage: result.success
-            ? "Your appointment has been cancelled. Let me know if you'd like to reschedule."
-            : "I couldn't cancel that appointment. Please try again or contact support.",
-        };
-
         return {
           content: [
             {
               type: 'text',
-              text: `<json>${JSON.stringify(cancelPayload)}</json>`,
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -515,7 +411,6 @@ const handler = createMcpHandler((server) => {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-                customerFacingMessage: "Something went wrong. Please try again.",
               })}</json>`,
             },
           ],
@@ -525,7 +420,7 @@ const handler = createMcpHandler((server) => {
   );
 
   // ============================================
-  // Tool 6: Reschedule Appointment
+  // Tool 5: Reschedule Appointment
   // ============================================
   server.tool(
     'RescheduleAppointment',
@@ -575,18 +470,11 @@ const handler = createMcpHandler((server) => {
 
         console.log('✅ [RescheduleAppointment] Result:', JSON.stringify(result, null, 2));
 
-        const reschedulePayload = {
-          ...result,
-          customerFacingMessage: result.success
-            ? "Your appointment has been rescheduled. You'll get an updated confirmation by SMS."
-            : "I couldn't reschedule that. Please try again or pick another time.",
-        };
-
         return {
           content: [
             {
               type: 'text',
-              text: `<json>${JSON.stringify(reschedulePayload)}</json>`,
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -600,7 +488,6 @@ const handler = createMcpHandler((server) => {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-                customerFacingMessage: "Something went wrong. Please try again.",
               })}</json>`,
             },
           ],
@@ -608,9 +495,8 @@ const handler = createMcpHandler((server) => {
       }
     }
   );
-
   // ============================================
-  // Tool 7: Calculate Date
+  // Tool 6: Calculate Date
   // ============================================
   server.tool(
     'CalculateDate',
@@ -623,15 +509,11 @@ const handler = createMcpHandler((server) => {
       try {
         console.log('📅 [CalculateDate] Called');
         const result = await BookingService.calculateDate(args.query, args.timezone);
-        const payload = {
-          ...result,
-          customerFacingMessage: `That would be ${result.date}.`,
-        };
         return {
           content: [
             {
               type: 'text',
-              text: `<json>${JSON.stringify(payload)}</json>`,
+              text: `<json>${JSON.stringify(result)}</json>`,
             },
           ],
         };
@@ -645,7 +527,6 @@ const handler = createMcpHandler((server) => {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 code: 'UNKNOWN_ERROR',
-                customerFacingMessage: "I couldn't work out that date. Can you say it again, for example 'next Monday'?",
               })}</json>`,
             },
           ],

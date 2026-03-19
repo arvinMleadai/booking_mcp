@@ -10,7 +10,6 @@ import type {
   BookingResponse,
   SlotSearchRequest,
   SlotsResponse,
-  BookingContextResponse,
   CancelRequest,
   CancelResponse,
   RescheduleRequest,
@@ -347,7 +346,6 @@ export class BookingService {
           success: false,
           error: extractResult.error,
           code: extractResult.code,
-          customerFacingMessage: "I couldn't verify the booking details. Please check the agent and client information.",
         };
       }
      
@@ -360,7 +358,6 @@ export class BookingService {
           success: false,
           error: `Agent not found: ${ids.agentId}`,
           code: 'AGENT_NOT_FOUND' as ErrorCode,
-          customerFacingMessage: "I couldn't find that agent. Please try another name or check the details.",
         };
       }
 
@@ -376,7 +373,6 @@ export class BookingService {
           success: false,
           error: 'No calendar connection found',
           code: 'CALENDAR_NOT_FOUND' as ErrorCode,
-          customerFacingMessage: "There's no calendar connected for this agent. We can't check availability right now.",
         };
       }
 
@@ -423,29 +419,18 @@ export class BookingService {
           success: false,
           error: slotsResult.error || 'No slots found',
           code: 'API_ERROR' as ErrorCode,
-          customerFacingMessage: "I couldn't find any available times for that day. Would you like to try another date?",
         };
       }
 
-      const slots = slotsResult.availableSlots.map((slot) => ({
-        start: DateTime.fromISO(slot.start).setZone(timezone || 'UTC').toISO() || slot.start,
-        end: DateTime.fromISO(slot.end).setZone(timezone || 'UTC').toISO() || slot.end,
-        startFormatted: slot.startFormatted,
-        endFormatted: slot.endFormatted,
-        available: true,
-      }));
-      const agentName = agent.profileName || agent.name;
-      const slotList = slots.slice(0, 5).map((s) => s.startFormatted || s.start).join(', ');
-      const customerFacingMessage =
-        slots.length === 0
-          ? "I couldn't find any available times for that day. Would you like to try another date?"
-          : slots.length === 1
-            ? `I found one option: ${slotList}. Should I book that for you?`
-            : `I found ${slots.length} available times: ${slotList}. Which one works for you?`;
-
       return {
         success: true,
-        slots,
+        slots: slotsResult.availableSlots.map((slot) => ({
+          start: DateTime.fromISO(slot.start).setZone(timezone || 'UTC').toISO() || slot.start,
+          end: DateTime.fromISO(slot.end).setZone(timezone || 'UTC').toISO() || slot.end,
+          startFormatted: slot.startFormatted,
+          endFormatted: slot.endFormatted,
+          available: true,
+        })),
         agent: {
           uuid: agent.uuid,
           name: agent.name,
@@ -453,7 +438,7 @@ export class BookingService {
           title: agent.title,
           email: agent.email,
         },
-        customerFacingMessage,
+        // Include resolved caller info so BookAppointment can use it directly
         ...(customerResult.found && { customer: customerResult.customer }),
       };
     } catch (error) {
@@ -466,91 +451,6 @@ export class BookingService {
     }
   }
 
-  /**
-   * Resolve booking context only (IDs + agent + calendar). Use before FindAvailableSlots
-   * so the agent can tell the customer what is being checked. Returns a short
-   * customerFacingMessage for the agent to say (e.g. "I'm checking Sarah's calendar.").
-   */
-  static async resolveBookingContext(request: {
-    instructionsText?: string;
-    agentId?: string;
-    clientId?: number;
-    boardId?: string;
-    stageId?: string;
-    dealId?: number;
-    timezone?: string;
-    calendarId?: string;
-  }): Promise<BookingContextResponse> {
-    try {
-      const extractResult = await this.extractAndValidateIds(
-        request.instructionsText,
-        {
-          agentId: request.agentId,
-          clientId: request.clientId,
-          boardId: request.boardId,
-          stageId: request.stageId,
-          dealId: request.dealId,
-          timezone: request.timezone,
-        }
-      );
-      if (!extractResult.valid || !extractResult.ids) {
-        return {
-          success: false,
-          error: extractResult.error,
-          code: extractResult.code,
-          customerFacingMessage: "I couldn't verify the booking details. Please check the agent and client information.",
-        };
-      }
-      const ids = extractResult.ids;
-      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
-      if (!agent) {
-        return {
-          success: false,
-          error: `Agent not found: ${ids.agentId}`,
-          code: 'AGENT_NOT_FOUND' as ErrorCode,
-          customerFacingMessage: "I couldn't find that agent. Please try another name or check the details.",
-        };
-      }
-      const calendarSelection = await this.selectCalendar(
-        ids.agentId,
-        ids.boardId ?? null,
-        ids.clientId,
-        request.calendarId
-      );
-      if (!calendarSelection) {
-        return {
-          success: false,
-          error: 'No calendar connection found',
-          code: 'CALENDAR_NOT_FOUND' as ErrorCode,
-          customerFacingMessage: "There's no calendar connected for this agent. We can't check availability right now.",
-        };
-      }
-      const agentName = agent.profileName || agent.name;
-      return {
-        success: true,
-        ids,
-        agent: {
-          uuid: agent.uuid,
-          name: agent.name,
-          profileName: agent.profileName,
-          title: agent.title,
-          email: agent.email,
-          timezone: agent.timezone,
-          officeHours: agent.officeHours,
-        },
-        calendarConnected: true,
-        customerFacingMessage: `I'm checking ${agentName}'s calendar. One moment.`,
-      };
-    } catch (error) {
-      console.error('❌ [BookingService.resolveBookingContext] Error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        code: 'UNKNOWN_ERROR' as ErrorCode,
-        customerFacingMessage: "Something went wrong while loading the calendar. Please try again.",
-      };
-    }
-  }
 
   /**
    * Cancel customer appointment
