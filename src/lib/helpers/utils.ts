@@ -3,10 +3,15 @@ import Fuse from "fuse.js";
 import { DateTime } from "luxon";
 import type { AgentWithCalendar } from "@/types";
 
-// Create a single Supabase client instance to reuse across all functions
+// Use service role key on server when available so agent/calendar lookups bypass RLS (anon key is subject to RLS and can return 0 rows for existing data)
+const supabaseKey =
+  typeof window === "undefined" && process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? process.env.SUPABASE_SERVICE_ROLE_KEY
+    : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  supabaseKey
 );
 
 /**
@@ -194,7 +199,7 @@ export const getAgentWithCalendarByUUID = async (
   clientId: number
 ): Promise<AgentWithCalendar | null> => {
   try {
-    // Get agent by UUID (UUID is unique, so no need to filter by client_id in query)
+    // Query by both uuid and client_id so we get at most one row; use maybeSingle() to avoid PGRST116 when 0 rows
     const { data: agent, error: agentError } = await supabase
       .schema("public")
       .from("agents")
@@ -211,17 +216,17 @@ export const getAgentWithCalendarByUUID = async (
       `
       )
       .eq("uuid", agentUUID)
+      .eq("client_id", clientId)
       .is("deleted_at", null)
-      .single();
+      .maybeSingle();
 
-    if (agentError || !agent) {
-      console.error("Agent not found:", agentError);
+    if (agentError) {
+      console.error("Agent lookup error:", agentError.message, agentError.code);
       return null;
     }
 
-    // Validate client_id matches for security (but don't use it in query since UUID is unique)
-    if (agent.client_id !== clientId) {
-      console.error(`Agent ${agentUUID} belongs to client ${agent.client_id}, not ${clientId}`);
+    if (!agent) {
+      console.warn(`Agent not found: uuid=${agentUUID}, clientId=${clientId} (no matching row in agents table)`);
       return null;
     }
 
