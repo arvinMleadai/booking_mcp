@@ -73,6 +73,128 @@ export async function getStageItemById(
   return data as unknown as StageItemInfo;
 }
 
+export type PipelineCalendarConnectionInfo = {
+  id: string;
+  provider_name: string;
+  email: string;
+  display_name: string;
+  is_connected: boolean | null;
+  expires_at: string;
+};
+
+export type StageProfileInfo = {
+  id: number;
+  name: string;
+  timezone: string | null;
+  office_hours: unknown;
+};
+
+export async function getPipelineCalendarConnectionByDealId(
+  dealId: number,
+  clientId: number
+): Promise<PipelineCalendarConnectionInfo | null> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .schema("public")
+    .from("stage_items")
+    .select(
+      `
+      id,
+      pipeline_stages:pipeline_stage_id (
+        id,
+        pipelines:pipeline_id (
+          id,
+          client_id,
+          calendar_id,
+          calendar_connections:calendar_id (
+            id,
+            provider_name,
+            email,
+            display_name,
+            is_connected,
+            expires_at
+          )
+        )
+      )
+    `
+    )
+    .eq("id", dealId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const record = data as unknown as {
+    pipeline_stages?: {
+      pipelines?: {
+        client_id?: number
+        calendar_connections?: PipelineCalendarConnectionInfo | null
+      } | null
+    } | null
+  }
+
+  const pipeline = record.pipeline_stages?.pipelines
+  const connection = pipeline?.calendar_connections
+
+  if (!pipeline || pipeline.client_id !== clientId) return null;
+  if (!connection) return null;
+
+  return connection as PipelineCalendarConnectionInfo;
+}
+
+export async function getStageProfileByDealId(
+  dealId: number,
+  clientId: number
+): Promise<StageProfileInfo | null> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .schema("public")
+    .from("stage_items")
+    .select(
+      `
+      id,
+      pipeline_stages:pipeline_stage_id (
+        id,
+        pipeline_id,
+        profile_id,
+        pipelines:pipeline_id (
+          id,
+          client_id
+        ),
+        profiles:profile_id (
+          id,
+          name,
+          timezone,
+          office_hours
+        )
+      )
+    `
+    )
+    .eq("id", dealId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const record = data as unknown as {
+    pipeline_stages?: {
+      pipelines?: { client_id?: number } | null;
+      profiles?: StageProfileInfo | null;
+    } | null;
+  };
+
+  const stage = record.pipeline_stages;
+  const pipeline = stage?.pipelines;
+  const profile = stage?.profiles;
+
+  if (!pipeline || pipeline.client_id !== clientId) return null;
+  if (!profile) return null;
+
+  return profile;
+}
+
 export function buildBookingSubject(params: {
   customerDisplayName: string;
   stageName?: string | null;

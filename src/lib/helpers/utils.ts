@@ -1,13 +1,11 @@
-import { createClient } from "@supabase/supabase-js";
+import 'server-only'
+import { createClient } from "@/lib/helpers/server";
 import Fuse from "fuse.js";
 import { DateTime } from "luxon";
 import type { AgentWithCalendar } from "@/types";
 
 // Create a single Supabase client instance to reuse across all functions
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 /**
  * Search for a customer by name using fuzzy search in the customer database
@@ -194,7 +192,30 @@ export const getAgentWithCalendarByUUID = async (
   clientId: number
 ): Promise<AgentWithCalendar | null> => {
   try {
-    // Get agent by UUID (UUID is unique, so no need to filter by client_id in query)
+    type AgentRow = {
+      uuid: string
+      client_id: number
+      name: string
+      description: string | null
+      title: string
+      is_dedicated: boolean
+      profile_id: number | null
+      assigned_email_id: number | null
+      agent_calendar_assignments?: Array<{
+        id: number
+        agent_id: string
+        calendar_id: string
+        calendar_connections?: {
+          id: string
+          provider_name: string
+          email: string
+          display_name: string
+          is_connected: boolean | null
+          expires_at: string
+        } | null
+      }> | null
+    }
+
     const { data: agent, error: agentError } = await supabase
       .schema("public")
       .from("agents")
@@ -207,7 +228,12 @@ export const getAgentWithCalendarByUUID = async (
         title,
         is_dedicated,
         profile_id,
-        assigned_email_id
+        assigned_email_id,
+        agent_calendar_assignments (
+          id,
+          agent_id,
+          calendar_id
+        )
       `
       )
       .eq("uuid", agentUUID)
@@ -219,106 +245,45 @@ export const getAgentWithCalendarByUUID = async (
       return null;
     }
 
-    // Validate client_id matches for security (but don't use it in query since UUID is unique)
-    if (agent.client_id !== clientId) {
-      console.error(`Agent ${agentUUID} belongs to client ${agent.client_id}, not ${clientId}`);
+    const agentRow = agent as unknown as AgentRow
+    if (agentRow.client_id !== clientId) {
+      console.error(`Agent ${agentUUID} belongs to client ${agentRow.client_id}, not ${clientId}`);
       return null;
     }
 
-    // Fetch profile separately since there's no foreign key relationship
-    let profileData: { id: number; name: string; office_hours: any; timezone: string } | undefined;
-    if (agent.profile_id) {
-      const { data: profile, error: profileError } = await supabase
-       .schema("public")
-        .from("profiles")
-        .select("id, name, office_hours, timezone")
-        .eq("id", agent.profile_id)
-        .single();
-      
-      if (!profileError && profile) {
-        profileData = profile;
-        console.log(`✅ Fetched profile for agent ${agent.name}:`, profile.name);
-      } else if (profileError) {
-        console.warn(`⚠️ Profile not found for profile_id: ${agent.profile_id}`, profileError);
-      }
-    }
+    const profileData: { id: number; name: string; office_hours: unknown; timezone: string | null } | undefined =
+      agentRow.profile_id
+        ? (await supabase
+            .schema('public')
+            .from('profiles')
+            .select('id, name, office_hours, timezone')
+            .eq('id', agentRow.profile_id)
+            .maybeSingle()).data ?? undefined
+        : undefined
 
-    // Get calendar assignment for this agent
-    const { data: assignment, error: assignmentError } = await supabase
-      .schema("public")
-      .from("agent_calendar_assignments")
-      .select("id, agent_id, calendar_id")
-      .eq("agent_id", agentUUID)
-      .is("deleted_at", null)
-      .single();
-
-    if (assignmentError) {
-      console.warn("No calendar assignment found for agent:", agentUUID);
-      return {
-        ...agent,
-        profiles: profileData,
-        calendar_assignment: null,
-      } as unknown as AgentWithCalendar;
-    }
-
-    // Get calendar connection from lead_dialer schema with full token details
-    const { data: calendarConnection, error: calendarError } = await supabase
-      .schema("lead_dialer")
-      .from("calendar_connections")
-      .select("id, client_id, provider_id, provider_name, email, display_name, is_connected, access_token, refresh_token, expires_at")
-      .eq("id", assignment.calendar_id)
-      .single();
-
-    if (calendarError) {
-      console.warn("Calendar connection not found:", calendarError);
-      return {
-        ...agent,
-        profiles: profileData,
-        calendar_assignment: {
-          ...assignment,
-          calendar_connections: null,
-        },
-      } as unknown as AgentWithCalendar;
-    }
-
-    // Validate token provider matches calendar provider
-    if (calendarConnection.access_token) {
-      const tokenParts = calendarConnection.access_token.split('.');
-      const isGoogleToken = calendarConnection.access_token.startsWith('ya29.') || calendarConnection.access_token.startsWith('1//');
-      
-      if (calendarConnection.provider_name === 'microsoft' && isGoogleToken) {
-        console.error(`❌ TOKEN PROVIDER MISMATCH for agent ${agentUUID}: Calendar is Microsoft but token is Google`);
-        console.error(`Token preview: ${calendarConnection.access_token.substring(0, 50)}...`);
-        return {
-          ...agent,
-          profiles: profileData,
-          calendar_assignment: {
-            ...assignment,
-            calendar_connections: null,
-          },
-        } as unknown as AgentWithCalendar;
-      }
-      
-      if (calendarConnection.provider_name === 'google' && !isGoogleToken) {
-        console.error(`❌ TOKEN PROVIDER MISMATCH for agent ${agentUUID}: Calendar is Google but token is Microsoft`);
-        return {
-          ...agent,
-          profiles: profileData,
-          calendar_assignment: {
-            ...assignment,
-            calendar_connections: null,
-          },
-        } as unknown as AgentWithCalendar;
-      }
-    }
+    const assignment = Array.isArray(agentRow.agent_calendar_assignments)
+      ? agentRow.agent_calendar_assignments.find((a) => a && typeof a.calendar_id === 'string') ?? null
+      : null
+    const { data: calendarConnection } = assignment?.calendar_id
+      ? await supabase
+          .schema('lead_dialer')
+          .from('calendar_connections')
+          .select('id, provider_name, email, display_name, is_connected, expires_at')
+          .eq('id', assignment.calendar_id)
+          .maybeSingle()
+      : { data: null }
 
     return {
-      ...agent,
+      ...agentRow,
       profiles: profileData,
-      calendar_assignment: {
-        ...assignment,
-        calendar_connections: calendarConnection,
-      },
+      calendar_assignment: assignment
+        ? {
+            id: assignment.id,
+            agent_id: assignment.agent_id,
+            calendar_id: assignment.calendar_id,
+            calendar_connections: calendarConnection,
+          }
+        : null,
     } as unknown as AgentWithCalendar;
   } catch (error) {
     console.error("Error fetching agent with calendar:", error);
@@ -337,6 +302,19 @@ export const getAgentsForClient = async (
   } = {}
 ) => {
   try {
+    type AgentListRow = {
+      uuid: string
+      name: string
+      title: string
+      description: string | null
+      is_dedicated: boolean
+      profile_id: number | null
+      agent_calendar_assignments?: Array<{
+        calendar_id: string
+        calendar_connections?: { id: string; provider_name: string; email: string; is_connected: boolean | null } | null
+      }> | null
+    }
+
     let query = supabase
       .schema("public")
       .from("agents")
@@ -347,7 +325,11 @@ export const getAgentsForClient = async (
         title,
         description,
         is_dedicated,
-        profile_id
+        profile_id,
+        agent_calendar_assignments (
+          agent_id,
+          calendar_id
+        )
       `
       )
       .eq("client_id", clientId)
@@ -365,77 +347,47 @@ export const getAgentsForClient = async (
       return [];
     }
 
-    // Fetch profiles separately for all agents that have profile_id
-    const profileIds = agents
+    const profileIds = (agents as unknown as AgentListRow[])
       .map((a) => a.profile_id)
-      .filter((id): id is number => id !== null && id !== undefined);
-    
-    let profilesMap: Record<number, { id: number; name: string; timezone?: string; office_hours?: any }> = {};
-    
-    if (profileIds.length > 0) {
-      const { data: profiles, error: profilesError } = await supabase
-        .schema("public")
-        .from("profiles")
-        .select("id, name, timezone, office_hours")
-        .in("id", profileIds);
-      
-      if (!profilesError && profiles) {
-        profilesMap = profiles.reduce((acc, profile) => {
-          acc[profile.id] = profile;
-          return acc;
-        }, {} as Record<number, typeof profiles[0]>);
-      } else if (profilesError) {
-        console.warn("Error fetching profiles:", profilesError);
-      }
-    }
+      .filter((id): id is number => id !== null && id !== undefined)
 
-    // Get calendar assignments for all agents
-    const { data: assignments, error: assignmentsError } = await supabase
-      .schema("public")
-      .from("agent_calendar_assignments")
-      .select("agent_id, calendar_id")
-      .in(
-        "agent_id",
-        agents.map((a) => a.uuid)
-      )
-      .is("deleted_at", null);
+    const { data: profiles } = profileIds.length > 0
+      ? await supabase
+          .schema('public')
+          .from('profiles')
+          .select('id, name, timezone, office_hours')
+          .in('id', profileIds)
+      : { data: [] }
 
-    if (assignmentsError) {
-      console.warn("Error fetching calendar assignments:", assignmentsError);
-    }
+    const profilesMap = (profiles ?? []).reduce<Record<number, { id: number; name: string; timezone: string | null }>>((acc, p) => {
+      acc[p.id] = { id: p.id, name: p.name, timezone: (p as unknown as { timezone: string | null }).timezone ?? null }
+      return acc
+    }, {})
 
-    // Get calendar connections separately (they're in lead_dialer schema)
-    let calendarConnections: Array<{
-      id: string;
-      provider_name: string;
-      email: string;
-      is_connected: boolean;
-    }> = [];
+    const calendarIds = (agents as unknown as AgentListRow[])
+      .flatMap((agent) => Array.isArray(agent.agent_calendar_assignments) ? agent.agent_calendar_assignments : [])
+      .map((a) => a.calendar_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
 
-    if (assignments && assignments.length > 0) {
-      const calendarIds = assignments.map((a) => a.calendar_id);
-      const { data: calendars, error: calendarsError } = await supabase
-        .schema("lead_dialer")
-        .from("calendar_connections")
-        .select("id, provider_name, email, is_connected")
-        .in("id", calendarIds);
+    const { data: calendars } = calendarIds.length > 0
+      ? await supabase
+          .schema('lead_dialer')
+          .from('calendar_connections')
+          .select('id, provider_name, email, is_connected')
+          .in('id', calendarIds)
+      : { data: [] }
 
-      if (calendarsError) {
-        console.warn("Error fetching calendar connections:", calendarsError);
-      } else {
-        calendarConnections = calendars || [];
-      }
-    }
+    const calendarMap = (calendars ?? []).reduce<Record<string, { provider_name: string; email: string; is_connected: boolean | null }>>((acc, c) => {
+      acc[c.id] = { provider_name: c.provider_name, email: c.email, is_connected: c.is_connected }
+      return acc
+    }, {})
 
-    // Map agents with calendar info and profiles
-    const agentsWithCalendar = agents.map((agent) => {
-      const assignment = assignments?.find((a) => a.agent_id === agent.uuid);
-      const calendarConnection = assignment
-        ? calendarConnections.find((c) => c.id === assignment.calendar_id)
-        : undefined;
-      
-      // Get profile data from the profiles map
-      const profile = agent.profile_id ? profilesMap[agent.profile_id] : undefined;
+    const agentsWithCalendar = (agents as unknown as AgentListRow[]).map((agent) => {
+      const assignment = Array.isArray(agent.agent_calendar_assignments)
+        ? agent.agent_calendar_assignments.find((a) => a && typeof a.calendar_id === 'string') ?? null
+        : null
+      const calendarConnection = assignment?.calendar_id ? calendarMap[assignment.calendar_id] : undefined
+      const profile = agent.profile_id ? profilesMap[agent.profile_id] : undefined
 
       return {
         uuid: agent.uuid,
@@ -443,16 +395,13 @@ export const getAgentsForClient = async (
         title: agent.title,
         description: agent.description,
         isDedicated: agent.is_dedicated,
-        hasCalendar: !!assignment && !!calendarConnection?.is_connected,
-        calendarProvider: calendarConnection?.provider_name as
-          | "microsoft"
-          | "google"
-          | undefined,
+        hasCalendar: Boolean(calendarConnection?.is_connected),
+        calendarProvider: calendarConnection?.provider_name as 'microsoft' | 'google' | undefined,
         calendarEmail: calendarConnection?.email,
         profileName: profile?.name,
-        timezone: profile?.timezone,
-      };
-    });
+        timezone: profile?.timezone ?? undefined,
+      }
+    })
 
     // Filter by calendar availability if specified
     if (options.withCalendarOnly) {
@@ -525,19 +474,16 @@ export const validateAgentHasCalendar = async (
 
   // Priority 2: Agent-specific calendar assignment (only if no board calendar specified)
   console.log(`📋 No board calendar specified, checking agent's assigned calendar...`);
-  const agentCalendarConnection = agent.calendar_assignment
-    ?.calendar_connections as unknown as
-    | {
-        id: string;
-        provider_name: string;
-        is_connected: boolean;
-      }
+  const agentCalendarConnection = agent.calendar_assignment?.calendar_connections as
+    | { id: string; provider_name: string; is_connected: boolean | null }
+    | null
     | undefined;
 
   if (agentCalendarConnection?.is_connected) {
     console.log(`✅ Using agent's assigned calendar`);
     return {
       isValid: true,
+      calendarId: agentCalendarConnection.id,
       calendarProvider: agentCalendarConnection.provider_name as
         | "microsoft"
         | "google",

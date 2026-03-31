@@ -42,17 +42,16 @@ import {
   getCustomerWithFuzzySearch,
   getContactWithFuzzySearch,
 } from '../utils';
-import { createClient } from '@supabase/supabase-js';
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createClient } from '@/lib/helpers/server'
+const supabase = createClient()
 
 import {
   getStageItemById,
   getPipelineStageById,
   getPipelineById,
   getPartyContactInfo,
+  getPipelineCalendarConnectionByDealId,
+  getStageProfileByDealId,
 } from '../booking_functions/bookingMetadata';
 import { CalendarService } from '../booking_functions/calendar/calendar-service';
 import { getCalendarConnectionByPipelineId } from '../booking_functions/calendar/graphDatabase';
@@ -145,7 +144,7 @@ export class BookingService {
       console.log('✅ Customer found:', customerResult.customer);
 
       // Step 4: Get agent with calendar
-      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
+      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId, ids.dealId ?? null);
       if (!agent) {
         return {
           success: false,
@@ -159,6 +158,7 @@ export class BookingService {
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
         ids.boardId ?? null,
+        ids.dealId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -352,7 +352,7 @@ export class BookingService {
       const ids = extractResult.ids;
 
       // Get agent data
-      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
+      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId, ids.dealId ?? null);
       if (!agent) {
         return {
           success: false,
@@ -365,6 +365,7 @@ export class BookingService {
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
         ids.boardId ?? null,
+        ids.dealId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -488,6 +489,7 @@ export class BookingService {
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
         ids.boardId ?? null,
+        ids.dealId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -518,7 +520,7 @@ export class BookingService {
       if (ids.dealId) {
         const customerResult = await this.lookupCustomer(ids.dealId, ids.clientId);
         const customerPhone = customerResult.customer?.phoneNumber;
-        const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
+        const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId, ids.dealId ?? null);
         
         if (customerPhone && agent) {
           const smsMessage = `Your appointment with ${agent.profileName} has been cancelled. Please contact us if you need to reschedule.\n\nPowered By: LeadAi`;
@@ -599,7 +601,7 @@ export class BookingService {
       }
 
       // Get agent for office hours validation
-      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId);
+      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId, ids.dealId ?? null);
       if (agent?.officeHours && agent?.timezone) {
         const hoursValidation = validateOfficeHours(
           startDateTime,
@@ -619,6 +621,7 @@ export class BookingService {
       const calendarSelection = await this.selectCalendar(
         ids.agentId,
         ids.boardId ?? null,
+        ids.dealId ?? null,
         ids.clientId,
         request.calendarId
       );
@@ -869,7 +872,8 @@ export class BookingService {
   private static async getAgentData(
     agentId: string,
     clientId: number,
-    stageId?: string
+    stageId?: string,
+    dealId?: number | null
   ): Promise<BookingAgent & { officeHours?: any; timezone?: string } | null> {
     try {
       const agent = await getAgentWithCalendarByUUID(agentId, clientId);
@@ -879,8 +883,22 @@ export class BookingService {
       // Otherwise, fall back to the agent's default profile
       let profileData: { id: number; name: string; office_hours: any; timezone: string } | undefined;
       
-      if (stageId) {
-        console.log(`🔍 [getAgentData] Fetching profile from stage: ${stageId}`);
+      if (dealId) {
+        console.log(`🔍 [getAgentData] Fetching stage profile from dealId: ${dealId}`);
+        const stageProfile = await getStageProfileByDealId(dealId, clientId);
+        if (stageProfile) {
+          profileData = {
+            id: stageProfile.id,
+            name: stageProfile.name,
+            office_hours: stageProfile.office_hours,
+            timezone: stageProfile.timezone || 'UTC'
+          };
+          console.log('✅ [getAgentData] Fetched profile from deal stage:', stageProfile.name);
+        }
+      }
+
+      if (!profileData && stageId) {
+        console.log(`🔍 [getAgentData] Fetching profile from stageId: ${stageId}`);
         const { data: stage, error: stageError } = await supabase
           .schema('public')
           .from('pipeline_stages')
@@ -902,7 +920,7 @@ export class BookingService {
 
           if (!profileError && profile) {
             profileData = profile;
-            console.log(`✅ [getAgentData] Fetched profile from stage:`, profile.name);
+            console.log('✅ [getAgentData] Fetched profile from stageId:', profile.name);
           } else {
             console.warn(`⚠️ [getAgentData] Profile not found for profile_id: ${stage.profile_id}`, profileError);
           }
@@ -947,6 +965,7 @@ export class BookingService {
   private static async selectCalendar(
     agentId: string,
     boardId: string | null,
+    dealId: number | null,
     clientId: number,
     explicitCalendarId?: string
   ): Promise<CalendarSelection | null> {
@@ -961,14 +980,34 @@ export class BookingService {
         };
       }
 
-      // Priority 2: Pipeline calendar
+      const mapProvider = (providerName: string | undefined): 'MICROSOFT' | 'GOOGLE' => {
+        const upper = (providerName || '').toUpperCase()
+        if (upper === 'MICROSOFT') return 'MICROSOFT'
+        return 'GOOGLE'
+      }
+
+      // Priority 2: Pipeline calendar (prefer dealId → stage_items → pipeline calendar)
+      if (dealId) {
+        const pipelineCalendar = await getPipelineCalendarConnectionByDealId(dealId, clientId);
+        if (pipelineCalendar) {
+          return {
+            calendarId: pipelineCalendar.id.toString(),
+            calendarEmail: pipelineCalendar.email || '',
+            provider: mapProvider(pipelineCalendar.provider_name),
+            source: 'pipeline',
+            calendarConnection: pipelineCalendar,
+          };
+        }
+      }
+
+      // Priority 2b: Pipeline calendar via boardId (fallback)
       if (boardId) {
         const pipelineCalendar = await getCalendarConnectionByPipelineId(boardId, clientId);
         if (pipelineCalendar) {
           return {
             calendarId: pipelineCalendar.id.toString(),
             calendarEmail: pipelineCalendar.email || '',
-            provider: pipelineCalendar.provider_name as 'MICROSOFT' | 'GOOGLE',
+            provider: mapProvider(pipelineCalendar.provider_name),
             source: 'pipeline',
             calendarConnection: pipelineCalendar,
           };
@@ -982,7 +1021,7 @@ export class BookingService {
         return {
           calendarId: agentCalendar.id.toString(),
           calendarEmail: agentCalendar.email || '',
-          provider: agentCalendar.provider_name as 'MICROSOFT' | 'GOOGLE',
+          provider: mapProvider(agentCalendar.provider_name),
           source: 'agent',
           calendarConnection: agentCalendar,
         };
