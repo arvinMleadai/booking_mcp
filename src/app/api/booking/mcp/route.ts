@@ -25,14 +25,23 @@ const handler = createMcpHandler((server) => {
       handler: (args: z.infer<z.ZodObject<TArgs>>) => Promise<McpResponse>
     }
   ): void => {
-    const register = server.tool as unknown as (
-      name: string,
-      description: string,
-      params: TArgs,
-      cb: (args: z.infer<z.ZodObject<TArgs>>) => Promise<McpResponse>
-    ) => unknown
-    register(input.currentName, input.description, input.args, input.handler)
-    register(input.legacyName, `${input.description} (legacy alias)`, input.args, input.handler)
+    ;(
+      server.tool as unknown as (
+        name: string,
+        description: string,
+        params: TArgs,
+        cb: (args: z.infer<z.ZodObject<TArgs>>) => Promise<McpResponse>
+      ) => unknown
+    )(input.currentName, input.description, input.args, input.handler)
+
+    ;(
+      server.tool as unknown as (
+        name: string,
+        description: string,
+        params: TArgs,
+        cb: (args: z.infer<z.ZodObject<TArgs>>) => Promise<McpResponse>
+      ) => unknown
+    )(input.legacyName, `${input.description} (legacy alias)`, input.args, input.handler)
   }
 
   // ============================================
