@@ -183,6 +183,12 @@ const handler = createMcpHandler((server) => {
         .default(true)
         .describe('Create online meeting link (default: true)'),
       calendarId: z.string().optional().describe('Calendar ID override (optional)'),
+      bookingIntentToken: z
+        .string()
+        .optional()
+        .describe(
+          'Opaque token from the chosen slot in slots-find.v1 (same startDateTime/endDateTime). Speeds up booking when BOOKING_INTENT_SECRET is set.'
+        ),
     },
     handler: async (args) => {
       try {
@@ -246,6 +252,7 @@ const handler = createMcpHandler((server) => {
           location: args.location,
           isOnlineMeeting: args.isOnlineMeeting,
           calendarId: args.calendarId,
+          bookingIntentToken: args.bookingIntentToken,
         });
 
         console.log('✅ [booking-create.v1] Result:', JSON.stringify(getLogSafeSummary(result)))
@@ -693,7 +700,11 @@ const handler = createMcpHandler((server) => {
       description: z.string().optional().describe('Meeting description (optional)'),
       location: z.string().optional().describe('Meeting location (optional)'),
       isOnlineMeeting: z.boolean().optional().default(true).describe('Create online meeting link (default: true)'),
-      calendarId: z.string().optional().describe('Calendar ID override (optional)')
+      calendarId: z.string().optional().describe('Calendar ID override (optional)'),
+      bookingIntentToken: z
+        .string()
+        .optional()
+        .describe('From inbound-slots-find.v1 slot; same start/end ISO as that slot.')
     },
     async (args) => {
       try {
@@ -729,7 +740,8 @@ const handler = createMcpHandler((server) => {
           description: args.description,
           location: args.location,
           isOnlineMeeting: args.isOnlineMeeting,
-          calendarId: args.calendarId
+          calendarId: args.calendarId,
+          bookingIntentToken: args.bookingIntentToken
         })
 
         console.log('✅ [inbound-booking-create.v1] Result:', JSON.stringify(getLogSafeSummary(result)))

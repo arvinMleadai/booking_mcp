@@ -45,6 +45,11 @@ export interface BookingRequest {
   // Optional - will be merged with extracted IDs
   extractedIds?: BookingIds;
 
+  /**
+   * From slots-find slot payload (requires BOOKING_INTENT_SECRET on server).
+   */
+  bookingIntentToken?: string;
+
   // Optional - customer details
   customerInfo?: CustomerInfo;
 
@@ -150,6 +155,8 @@ export interface AvailableSlot {
   available: boolean;
   agentName?: string;
   agentEmail?: string;
+  /** Pass to booking-create with the same start/end ISO times for a faster path */
+  bookingIntentToken?: string;
 }
 
 export interface BookingSuccessResponse {
@@ -224,7 +231,10 @@ export enum ErrorCode {
   CUSTOMER_NOT_FOUND = "CUSTOMER_NOT_FOUND",
   AGENT_NOT_FOUND = "AGENT_NOT_FOUND",
   CALENDAR_NOT_FOUND = "CALENDAR_NOT_FOUND",
-  
+  INVALID_BOOKING_INTENT = "INVALID_BOOKING_INTENT",
+  BOOKING_INTENT_MISMATCH = "BOOKING_INTENT_MISMATCH",
+  BOOKING_INTENT_NOT_CONFIGURED = "BOOKING_INTENT_NOT_CONFIGURED",
+
   // API errors
   API_ERROR = "API_ERROR",
   DATABASE_ERROR = "DATABASE_ERROR",
@@ -253,7 +263,7 @@ export interface CalendarSelection {
   calendarId: string;
   calendarEmail: string;
   provider: 'MICROSOFT' | 'GOOGLE';
-  source: 'explicit' | 'pipeline' | 'agent';
+  source: 'explicit' | 'pipeline' | 'agent' | 'intent';
   calendarConnection?: any;
 }
 

@@ -158,7 +158,8 @@ export class CalendarService {
     clientId: number,
     request: CreateEventRequest,
     agentId?: string,
-    calendarConnectionId?: string
+    calendarConnectionId?: string,
+    options?: { skipConflictPrecheck?: boolean }
   ): Promise<{
     success: boolean
     event?: CalendarEvent
@@ -193,49 +194,49 @@ export class CalendarService {
       // Get timezone directly from database (don't need calendar connection for this)
       const timeZone = await AdvancedCacheService.getClientTimezone(clientId) || 'UTC'
 
-      // Check for conflicts using optimized conflict detection
-      const { OptimizedConflictDetection } = await import('./optimizedConflictDetection')
-      const conflictCheck = await OptimizedConflictDetection.checkForConflicts(
-        connection,
-        request.startDateTime,
-        request.endDateTime,
-        timeZone,
-        undefined, // officeHours - will be passed from CalendarService.findAvailableSlots
-        undefined, // agentTimezone - will be passed from CalendarService.findAvailableSlots
-        clientId, // Pass clientId so it can use CalendarService
-        connection.id // Ensure conflict detection fetches events from the SAME connection
-      )
-
-      // Block booking if there's ANY conflict
-      if (conflictCheck.hasConflict) {
-        // Try to find available slots as alternatives
-        const availableSlotsResult = await OptimizedConflictDetection.findAvailableSlots(
+      const skipConflictPrecheck = options?.skipConflictPrecheck === true
+      if (!skipConflictPrecheck) {
+        const { OptimizedConflictDetection } = await import('./optimizedConflictDetection')
+        const conflictCheck = await OptimizedConflictDetection.checkForConflicts(
           connection,
           request.startDateTime,
           request.endDateTime,
           timeZone,
-          {
-            durationMinutes: Math.round(
-              (new Date(request.endDateTime).getTime() - new Date(request.startDateTime).getTime()) / (1000 * 60)
-            ) || 30,
-            maxSuggestions: 3,
-          },
-          clientId,
           undefined,
+          undefined,
+          clientId,
           connection.id
         )
-
-        return {
-          success: false,
-          error: `Scheduling conflict detected: ${conflictCheck.conflictDetails || 'Time slot is already booked'}`,
-          availableSlots: availableSlotsResult.availableSlots?.map(slot => ({
-            start: slot.start.toISOString(),
-            end: slot.end.toISOString(),
-            startFormatted: slot.startFormatted,
-            endFormatted: slot.endFormatted,
-            confidence: slot.confidence,
-          })),
+        if (conflictCheck.hasConflict) {
+          const availableSlotsResult = await OptimizedConflictDetection.findAvailableSlots(
+            connection,
+            request.startDateTime,
+            request.endDateTime,
+            timeZone,
+            {
+              durationMinutes: Math.round(
+                (new Date(request.endDateTime).getTime() - new Date(request.startDateTime).getTime()) / (1000 * 60)
+              ) || 30,
+              maxSuggestions: 3,
+            },
+            clientId,
+            undefined,
+            connection.id
+          )
+          return {
+            success: false,
+            error: `Scheduling conflict detected: ${conflictCheck.conflictDetails || 'Time slot is already booked'}`,
+            availableSlots: availableSlotsResult.availableSlots?.map(slot => ({
+              start: slot.start.toISOString(),
+              end: slot.end.toISOString(),
+              startFormatted: slot.startFormatted,
+              endFormatted: slot.endFormatted,
+              confidence: slot.confidence,
+            })),
+          }
         }
+      } else {
+        console.log('⏭️ [CalendarService.createEvent] Skipping conflict precheck (already verified by caller)')
       }
 
       const result = await provider.createEvent(connection, {

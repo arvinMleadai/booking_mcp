@@ -31,12 +31,39 @@ interface AvailableSlot extends TimeSlot {
  * Optimized conflict detection service with smart algorithms
  */
 export class OptimizedConflictDetection {
-  
+  /** If the requested range spans at least this long, treat it as "whole calendar day" discovery (not a concrete appointment window). */
+  private static readonly FULL_DAY_RANGE_MIN_MS = 22 * 60 * 60 * 1000
+
   // Search windows - using full day to avoid timezone issues
   private static readonly SEARCH_WINDOWS = {
     CONFLICT_CHECK: 24 * 60 * 60 * 1000,   // Full day to avoid timezone conversion issues
     SLOT_SEARCH: 4 * 60 * 60 * 1000,       // 4 hours before/after for slot finding
     EXTENDED_SEARCH: 8 * 60 * 60 * 1000    // 8 hours for extended search
+  }
+
+  /**
+   * Midpoint of configured office hours on the requested local day (fallback: 13:00 local).
+   * Used as a preference anchor so full-day searches do not bias toward midnight / morning.
+   */
+  private static getSlotPreferenceAnchor(
+    requestedStart: Date,
+    officeHours: Record<string, { start: string; end: string; enabled: boolean }> | null | undefined,
+    agentTimezone: string
+  ): Date {
+    const dt = DateTime.fromJSDate(requestedStart).setZone(agentTimezone)
+    const dayOfWeek = dt.toFormat('cccc').toLowerCase()
+    const schedule = officeHours?.[dayOfWeek]
+    if (schedule?.enabled && schedule.start && schedule.end) {
+      const startParts = schedule.start.split(':').map((p) => parseInt(p, 10))
+      const endParts = schedule.end.split(':').map((p) => parseInt(p, 10))
+      const startM = (startParts[0] || 0) * 60 + (startParts[1] || 0)
+      const endM = (endParts[0] || 0) * 60 + (endParts[1] || 0)
+      const midM = Math.floor((startM + endM) / 2)
+      const midH = Math.floor(midM / 60)
+      const midMin = midM % 60
+      return dt.set({ hour: midH, minute: midMin, second: 0, millisecond: 0 }).toJSDate()
+    }
+    return dt.set({ hour: 13, minute: 0, second: 0, millisecond: 0 }).toJSDate()
   }
 
   /**
@@ -215,16 +242,29 @@ export class OptimizedConflictDetection {
       
       const requestedStart = new Date(requestedStartTime)
       const requestedEnd = new Date(requestedEndTime)
-      
-      // First check if requested time is available (including office hours validation)
-      const conflictCheck = await this.checkForConflicts(
-        connection,
-        requestedStartTime,
-        requestedEndTime,
-        timeZone,
-        officeHours,
-        agentTimezone
-      )
+      const rangeSpanMs = requestedEnd.getTime() - requestedStart.getTime()
+      const isFullDayDiscovery = rangeSpanMs >= this.FULL_DAY_RANGE_MIN_MS
+      let conflictCheck: ConflictResult
+      if (isFullDayDiscovery) {
+        console.log(
+          '📅 Full-day slot discovery: skipping initial conflict check (start/end is whole calendar day, not a single appointment)'
+        )
+        conflictCheck = { hasConflict: false }
+      } else {
+        conflictCheck = await this.checkForConflicts(
+          connection,
+          requestedStartTime,
+          requestedEndTime,
+          timeZone,
+          officeHours,
+          agentTimezone,
+          clientId,
+          calendarConnectionId || connection.id
+        )
+      }
+      const preferenceAnchor = isFullDayDiscovery
+        ? this.getSlotPreferenceAnchor(requestedStart, officeHours, agentTimezone)
+        : requestedStart
       
       // Determine search window for finding slots
       // If office hours are configured and violated, search the entire day within office hours
@@ -308,7 +348,8 @@ export class OptimizedConflictDetection {
         durationMinutes,
         maxSuggestions,
         officeHours,
-        agentTimezone
+        agentTimezone,
+        preferenceAnchor
       )
 
       console.log(`💡 Found ${availableSlots.length} available slots`)
@@ -368,7 +409,8 @@ export class OptimizedConflictDetection {
     durationMinutes: number,
     maxSuggestions: number,
     officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
-    agentTimezone?: string
+    agentTimezone?: string,
+    preferenceAnchor?: Date
   ): AvailableSlot[] {
     const slots: AvailableSlot[] = []
     const slotDuration = durationMinutes * 60 * 1000
@@ -377,6 +419,7 @@ export class OptimizedConflictDetection {
     
     // Use agent timezone for day boundaries (default to UTC if not provided)
     const tz = agentTimezone || ""
+    const anchor = preferenceAnchor ?? requestedStart
     
     // Get the requested day in the agent's timezone (not UTC)
     const requestedDayInTZ = this.getDateStringInTimezone(requestedStart, tz)
@@ -393,7 +436,7 @@ export class OptimizedConflictDetection {
     
     // Generate candidate slots with smart intervals
     const candidates = this.generateSmartCandidates(
-      requestedStart,
+      anchor,
       searchStart,
       searchEnd,
       slotDuration,
@@ -453,8 +496,8 @@ export class OptimizedConflictDetection {
         }
       }
 
-      // Calculate confidence score based on proximity to requested time
-      const confidence = this.calculateSlotConfidence(candidate.start, requestedStart)
+      // Calculate confidence score based on proximity to preference anchor
+      const confidence = this.calculateSlotConfidence(candidate.start, anchor, tz || undefined)
       
       slots.push({
         start: candidate.start,
@@ -472,10 +515,11 @@ export class OptimizedConflictDetection {
   }
 
   /**
-   * Generate smart candidate slots focusing on preferred times
+   * Generate candidate slots, fanning out from the preference anchor so whole-day searches
+   * surface midday/afternoon options instead of only scanning from midnight.
    */
   private static generateSmartCandidates(
-    requestedStart: Date,
+    preferenceAnchor: Date,
     searchStart: Date,
     searchEnd: Date,
     slotDuration: number,
@@ -483,21 +527,34 @@ export class OptimizedConflictDetection {
   ): TimeSlot[] {
     const candidates: TimeSlot[] = []
     const interval = intervalMinutes * 60 * 1000
-    
-    // Generate slots with preference for times close to requested time
-    let currentTime = new Date(searchStart)
-    
-    while (currentTime < searchEnd && candidates.length < 50) { // Limit candidates
-      const slotEnd = new Date(currentTime.getTime() + slotDuration)
-      
+    const searchStartMs = searchStart.getTime()
+    const searchEndMs = searchEnd.getTime()
+    const addSlotIfFits = (startMs: number): void => {
+      if (candidates.length >= 50) {
+        return
+      }
+      const slotEndMs = startMs + slotDuration
+      if (startMs < searchStartMs || slotEndMs > searchEndMs) {
+        return
+      }
       candidates.push({
-        start: new Date(currentTime),
-        end: slotEnd
+        start: new Date(startMs),
+        end: new Date(slotEndMs),
       })
-      
-      currentTime = new Date(currentTime.getTime() + interval)
     }
-    
+    let anchorRounded =
+      searchStartMs + Math.floor((preferenceAnchor.getTime() - searchStartMs) / interval) * interval
+    if (anchorRounded < searchStartMs) {
+      anchorRounded = searchStartMs
+    }
+    addSlotIfFits(anchorRounded)
+    let offset = interval
+    const maxSpan = searchEndMs - searchStartMs
+    while (candidates.length < 50 && offset < maxSpan) {
+      addSlotIfFits(anchorRounded + offset)
+      addSlotIfFits(anchorRounded - offset)
+      offset += interval
+    }
     return candidates
   }
 
@@ -511,16 +568,22 @@ export class OptimizedConflictDetection {
   /**
    * Calculate confidence score for a slot based on proximity to requested time
    */
-  private static calculateSlotConfidence(slotStart: Date, requestedStart: Date): number {
-    const timeDiff = Math.abs(slotStart.getTime() - requestedStart.getTime())
+  private static calculateSlotConfidence(
+    slotStart: Date,
+    preferenceAnchor: Date,
+    displayTimezone?: string
+  ): number {
+    const timeDiff = Math.abs(slotStart.getTime() - preferenceAnchor.getTime())
     const maxDiff = 4 * 60 * 60 * 1000 // 4 hours
     
     // Confidence decreases with distance from requested time
     const proximityScore = Math.max(0, 1 - (timeDiff / maxDiff))
     
-    // Bonus for business hours (9 AM - 6 PM)
-    const hour = slotStart.getHours()
-    const businessHoursBonus = (hour >= 9 && hour < 18) ? 0.2 : 0
+    // Bonus for business hours (9 AM - 6 PM) in agent timezone
+    const hour = displayTimezone
+      ? DateTime.fromJSDate(slotStart, { zone: displayTimezone }).hour
+      : slotStart.getUTCHours()
+    const businessHoursBonus = hour >= 9 && hour < 18 ? 0.2 : 0
     
     return Math.min(1, proximityScore + businessHoursBonus)
   }

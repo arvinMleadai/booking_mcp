@@ -20,6 +20,7 @@ import type {
   AvailableSlot,
   CalendarSelection,
   ErrorCode,
+  CustomerLookupResult,
 } from './booking-types';
 import {
   extractBookingIds,
@@ -42,6 +43,7 @@ import {
   getCustomerWithFuzzySearch,
   getContactWithFuzzySearch,
 } from '../utils';
+import type { AgentWithCalendar } from '@/types';
 import { createClient } from '@/lib/helpers/server'
 const supabase = createClient()
 
@@ -54,7 +56,17 @@ import {
   getStageProfileByDealId,
 } from '../booking_functions/bookingMetadata';
 import { CalendarService } from '../booking_functions/calendar/calendar-service';
-import { getCalendarConnectionByPipelineId } from '../booking_functions/calendar/graphDatabase';
+import {
+  getCalendarConnectionByPipelineId,
+  getCalendarConnectionById,
+} from '../booking_functions/calendar/graphDatabase';
+import {
+  bookingIntentMatchesRequest,
+  getBookingIntentSecretOrNull,
+  mintBookingIntentToken,
+  verifyBookingIntentToken,
+  type BookingIntentPayloadV1,
+} from '@/lib/mcp/booking-mcp/booking-intent-token';
 import { OptimizedConflictDetection } from '../booking_functions/calendar/optimizedConflictDetection';
 import { sendSMS } from 'lead-ai-npm-modules';
 
@@ -80,6 +92,27 @@ export class BookingService {
   static async bookAppointment(request: BookingRequest): Promise<BookingResponse> {
     try {
       console.log('📞 [BookingService.bookAppointment] Starting booking process');
+
+      const intentSecret = getBookingIntentSecretOrNull();
+      if (request.bookingIntentToken && !intentSecret) {
+        return {
+          success: false,
+          error: 'Booking intent token is not supported (BOOKING_INTENT_SECRET is not set)',
+          code: 'BOOKING_INTENT_NOT_CONFIGURED' as ErrorCode,
+        };
+      }
+      let verifiedIntent: BookingIntentPayloadV1 | null = null;
+      if (request.bookingIntentToken && intentSecret) {
+        const verified = verifyBookingIntentToken(request.bookingIntentToken, intentSecret);
+        if (!verified.ok) {
+          return {
+            success: false,
+            error: `Invalid booking intent: ${verified.error}`,
+            code: 'INVALID_BOOKING_INTENT' as ErrorCode,
+          };
+        }
+        verifiedIntent = verified.payload;
+      }
 
       // Step 1: Extract and validate IDs
       const extractResult = await this.extractAndValidateIds(
@@ -107,18 +140,46 @@ export class BookingService {
       console.log('✅ IDs extracted:', ids);
       console.log('✅ Instructions Text:', request.instructionsText);
 
-      // RESOLVE DATES: Handle natural language override if present ("next Monday")
-      // This fixes LLM date calculation errors by using robust graph parsing
-      const resolved = await this.resolveDateOverride(
-        request.startDateTime,
-        request.endDateTime,
-        request.preferredDate,
-        ids.timezone || 'UTC'
-      );
-      const startDateTime = resolved.start;
-      const endDateTime = resolved.end;
+      if (verifiedIntent) {
+        const match = bookingIntentMatchesRequest(
+          verifiedIntent,
+          {
+            agentId: ids.agentId,
+            clientId: ids.clientId,
+            boardId: ids.boardId,
+            stageId: ids.stageId,
+            dealId: ids.dealId ?? null,
+          },
+          request.startDateTime,
+          request.endDateTime,
+          request.calendarId
+        );
+        if (!match) {
+          return {
+            success: false,
+            error: 'Booking intent does not match this request (IDs, calendar, or slot times)',
+            code: 'BOOKING_INTENT_MISMATCH' as ErrorCode,
+          };
+        }
+      }
 
-      // Step 2: Validate time slot
+      let startDateTime: string;
+      let endDateTime: string;
+      if (verifiedIntent) {
+        startDateTime = verifiedIntent.start;
+        endDateTime = verifiedIntent.end;
+        console.log('⚡ [bookAppointment] Using signed booking intent (fast path)');
+      } else {
+        const resolved = await this.resolveDateOverride(
+          request.startDateTime,
+          request.endDateTime,
+          request.preferredDate,
+          ids.timezone || 'UTC'
+        );
+        startDateTime = resolved.start;
+        endDateTime = resolved.end;
+      }
+
       const timeValidation = validateTimeSlot({
         startDateTime: startDateTime,
         endDateTime: endDateTime,
@@ -132,8 +193,71 @@ export class BookingService {
         };
       }
 
-      // Step 3: Lookup customer (dealId is optional for inbound calls)
-      const customerResult = await this.lookupCustomer(ids.dealId ?? null, ids.clientId, request.customerInfo);
+      let customerResult: CustomerLookupResult;
+      let agent:
+        | (BookingAgent & {
+            officeHours?: Record<string, { start: string; end: string; enabled: boolean }>
+            timezone?: string
+            agentCalendarPrecache?: AgentWithCalendar
+          })
+        | null;
+      let subject: string;
+      let calendarSelection: CalendarSelection | null;
+
+      if (verifiedIntent) {
+        const snap = verifiedIntent.agent;
+        agent = {
+          uuid: snap.uuid,
+          name: snap.name,
+          profileName: snap.profileName,
+          title: snap.title,
+          email: snap.email,
+          officeHours: (snap.officeHours as Record<string, { start: string; end: string; enabled: boolean }>) || DEFAULT_OFFICE_HOURS,
+          timezone: snap.timezone,
+        };
+        [customerResult, subject, calendarSelection] = await Promise.all([
+          this.lookupCustomer(ids.dealId ?? null, ids.clientId, request.customerInfo),
+          this.generateSubject(ids.stageId ?? null, ids.dealId ?? null, request.subject),
+          (async (): Promise<CalendarSelection | null> => {
+            const calendarConnection = await getCalendarConnectionById(verifiedIntent.calendarId, ids.clientId);
+            if (!calendarConnection) {
+              return null;
+            }
+            const upper = (calendarConnection.provider_name || '').toUpperCase();
+            const provider = upper === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
+            return {
+              calendarId: verifiedIntent.calendarId,
+              calendarEmail: calendarConnection.email || '',
+              provider,
+              source: 'intent',
+              calendarConnection,
+            };
+          })(),
+        ]);
+      } else {
+        [customerResult, agent, subject] = await Promise.all([
+          this.lookupCustomer(ids.dealId ?? null, ids.clientId, request.customerInfo),
+          this.getAgentData(ids.agentId, ids.clientId, ids.stageId, ids.dealId ?? null),
+          this.generateSubject(ids.stageId ?? null, ids.dealId ?? null, request.subject),
+        ]);
+        if (!agent) {
+          return {
+            success: false,
+            error: `Agent not found: ${ids.agentId}`,
+            code: 'AGENT_NOT_FOUND' as ErrorCode,
+          };
+        }
+        console.log('✅ Agent found:', agent.profileName);
+        calendarSelection = await this.selectCalendar(
+          ids.agentId,
+          ids.boardId ?? null,
+          ids.dealId ?? null,
+          ids.clientId,
+          request.calendarId,
+          agent.agentCalendarPrecache
+        );
+      }
+
       if (!customerResult.found && !request.customerInfo?.email) {
         return {
           success: false,
@@ -143,8 +267,6 @@ export class BookingService {
       }
       console.log('✅ Customer found:', customerResult.customer);
 
-      // Step 4: Get agent with calendar
-      const agent = await this.getAgentData(ids.agentId, ids.clientId, ids.stageId, ids.dealId ?? null);
       if (!agent) {
         return {
           success: false,
@@ -152,16 +274,10 @@ export class BookingService {
           code: 'AGENT_NOT_FOUND' as ErrorCode,
         };
       }
-      console.log('✅ Agent found:', agent.profileName);
+      if (!verifiedIntent) {
+        console.log('✅ Agent found:', agent.profileName);
+      }
 
-      // Step 5: Select calendar (boardId is optional for inbound calls)
-      const calendarSelection = await this.selectCalendar(
-        ids.agentId,
-        ids.boardId ?? null,
-        ids.dealId ?? null,
-        ids.clientId,
-        request.calendarId
-      );
       if (!calendarSelection) {
         return {
           success: false,
@@ -187,13 +303,6 @@ export class BookingService {
           };
         }
       }
-
-      // Step 7: Generate subject (stageId and dealId are optional for inbound calls)
-      const subject = await this.generateSubject(
-        ids.stageId ?? null,
-        ids.dealId ?? null,
-        request.subject
-      );
 
       // CHECK CONFLICTS: Prevent double bookings (explicit check)
       if (calendarSelection.calendarConnection) {
@@ -240,7 +349,8 @@ export class BookingService {
           isOnlineMeeting: request.isOnlineMeeting ?? true,
         },
         ids.agentId,
-        calendarSelection.calendarId
+        calendarSelection.calendarId,
+        { skipConflictPrecheck: true }
       );
 
       // Step 9: Handle result
@@ -270,13 +380,12 @@ export class BookingService {
 
       // Step 10: Send SMS confirmation
       const customerPhone = customerResult.customer?.phoneNumber || request.customerInfo?.phoneNumber;
-      const formattedStart = DateTime.fromISO(request.startDateTime, { zone: agent.timezone || 'UTC' })
+      const formattedStart = DateTime.fromISO(startDateTime, { zone: agent.timezone || 'UTC' })
         .toLocaleString(DateTime.DATETIME_FULL);
       const meetingLink = eventResult.event?.onlineMeetingUrl;
       
       const smsMessage = `Your appointment with ${agent.profileName} has been confirmed for ${formattedStart}.${meetingLink ? `\n\nJoin here: ${meetingLink}` : ''}\n\nPowered By: LeadAi`;
-      
-      await this.sendSMSNotification(customerPhone, smsMessage, 'appointment booking');
+      void this.sendSMSNotification(customerPhone, smsMessage, 'appointment booking');
 
       // Step 11: Return success
       return {
@@ -285,8 +394,8 @@ export class BookingService {
           event: {
             eventId: eventResult.eventId!,
             subject: eventResult.event?.subject || subject,
-            start: DateTime.fromISO(eventResult.event?.start.dateTime || request.startDateTime).setZone(agent.timezone || 'UTC').toISO() || request.startDateTime,
-            end: DateTime.fromISO(eventResult.event?.end.dateTime || request.endDateTime).setZone(agent.timezone || 'UTC').toISO() || request.endDateTime,
+            start: DateTime.fromISO(eventResult.event?.start.dateTime || startDateTime).setZone(agent.timezone || 'UTC').toISO() || startDateTime,
+            end: DateTime.fromISO(eventResult.event?.end.dateTime || endDateTime).setZone(agent.timezone || 'UTC').toISO() || endDateTime,
             location: eventResult.event?.location,
             meetingLink: eventResult.event?.onlineMeetingUrl,
             onlineMeetingUrl: eventResult.event?.onlineMeetingUrl,
@@ -367,7 +476,8 @@ export class BookingService {
         ids.boardId ?? null,
         ids.dealId ?? null,
         ids.clientId,
-        request.calendarId
+        request.calendarId,
+        agent.agentCalendarPrecache
       );
       if (!calendarSelection) {
         return {
@@ -378,7 +488,8 @@ export class BookingService {
       }
 
       // Parse natural language dates (today/tomorrow/this monday/etc) to ISO format
-      const timezone = ids.timezone || agent.timezone || 'Australia/Perth';
+      // Prefer agent profile timezone so office hours / day boundaries match the calendar config
+      const timezone = agent.timezone || ids.timezone || 'Australia/Perth';
       const parsedDateResult = parseGraphDateRequest(request.preferredDate, timezone);
       const logStart = DateTime.fromISO(parsedDateResult.start).setZone(timezone).toFormat('yyyy-MM-dd HH:mm');
       const logEnd = DateTime.fromISO(parsedDateResult.end).setZone(timezone).toFormat('yyyy-MM-dd HH:mm');
@@ -423,15 +534,46 @@ export class BookingService {
         };
       }
 
+      const intentSecret = getBookingIntentSecretOrNull();
       return {
         success: true,
-        slots: slotsResult.availableSlots.map((slot) => ({
-          start: DateTime.fromISO(slot.start).setZone(timezone || 'UTC').toISO() || slot.start,
-          end: DateTime.fromISO(slot.end).setZone(timezone || 'UTC').toISO() || slot.end,
-          startFormatted: slot.startFormatted,
-          endFormatted: slot.endFormatted,
-          available: true,
-        })),
+        slots: slotsResult.availableSlots.map((slot) => {
+          const startIso = DateTime.fromISO(slot.start).setZone(timezone || 'UTC').toISO() || slot.start;
+          const endIso = DateTime.fromISO(slot.end).setZone(timezone || 'UTC').toISO() || slot.end;
+          const row: AvailableSlot = {
+            start: startIso,
+            end: endIso,
+            startFormatted: slot.startFormatted,
+            endFormatted: slot.endFormatted,
+            available: true,
+          };
+          if (intentSecret) {
+            row.bookingIntentToken = mintBookingIntentToken(
+              {
+                clientId: ids.clientId as number,
+                agentId: ids.agentId as string,
+                calendarId: calendarSelection.calendarId,
+                boardId: ids.boardId?.trim() || null,
+                stageId: ids.stageId?.trim() || null,
+                dealId: ids.dealId && ids.dealId !== 0 ? ids.dealId : null,
+                timezone,
+                start: startIso,
+                end: endIso,
+                agent: {
+                  uuid: agent.uuid,
+                  name: agent.name,
+                  profileName: agent.profileName,
+                  title: agent.title,
+                  email: agent.email,
+                  officeHours: (agent.officeHours ?? null) as Record<string, unknown> | null,
+                  timezone: agent.timezone || timezone,
+                },
+              },
+              intentSecret
+            );
+          }
+          return row;
+        }),
         agent: {
           uuid: agent.uuid,
           name: agent.name,
@@ -874,7 +1016,15 @@ export class BookingService {
     clientId: number,
     stageId?: string,
     dealId?: number | null
-  ): Promise<BookingAgent & { officeHours?: any; timezone?: string } | null> {
+  ): Promise<
+    | (BookingAgent & {
+        officeHours?: any
+        timezone?: string
+        /** Supabase row already loaded; avoids a second agent fetch in selectCalendar */
+        agentCalendarPrecache: AgentWithCalendar
+      })
+    | null
+  > {
     try {
       const agent = await getAgentWithCalendarByUUID(agentId, clientId);
       if (!agent) return null;
@@ -951,6 +1101,7 @@ export class BookingService {
         email: (agent.calendar_assignment?.calendar_connections as any)?.email,
         officeHours: profileData?.office_hours || DEFAULT_OFFICE_HOURS,
         timezone: profileData?.timezone,
+        agentCalendarPrecache: agent,
       };
     } catch (error) {
       console.error('Error getting agent data:', error);
@@ -967,7 +1118,8 @@ export class BookingService {
     boardId: string | null,
     dealId: number | null,
     clientId: number,
-    explicitCalendarId?: string
+    explicitCalendarId?: string,
+    precachedAgent?: AgentWithCalendar | null
   ): Promise<CalendarSelection | null> {
     try {
       // Priority 1: Explicit calendar ID
@@ -1014,8 +1166,8 @@ export class BookingService {
         }
       }
 
-      // Priority 3: Agent's calendar
-      const agent = await getAgentWithCalendarByUUID(agentId, clientId);
+      // Priority 3: Agent's calendar (reuse row from getAgentData when provided)
+      const agent = precachedAgent ?? (await getAgentWithCalendarByUUID(agentId, clientId));
       const agentCalendar = agent?.calendar_assignment?.calendar_connections as any;
       if (agentCalendar) {
         return {
